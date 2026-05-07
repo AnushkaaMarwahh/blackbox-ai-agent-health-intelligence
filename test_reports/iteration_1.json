@@ -1,0 +1,40 @@
+{
+  "summary": "First-pass E2E testing of 3 new Blackbox features (Ask Blackbox API + UI, PDF export, typing animation). All 7 backend pytest tests passed and all frontend Playwright flows (Ask suggestion, custom send w/ disabled+spinner state, history persistence on close/reopen, PDF download, week-context refresh) passed. Real PDF (6.4 MB, valid %PDF- header, filename Blackbox_Weekly_Apr_28_-_May_4_2026.pdf) downloaded. Claude Sonnet 4.5 returned non-empty grounded answers and correctly reflected the newly-selected week (returned exact 'Apr 7 – 13, 2026' label).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Ask Blackbox panel", "issues": ["Assistant answers occasionally include literal markdown bold tokens like '**Customer Support Bot:**' which render as raw asterisks (not bold). System prompt already says 'Use plain text. No markdown headers.' — consider strengthening the prompt or stripping leading **...** tokens client-side."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Tighten SYSTEM_MESSAGE or post-process answer text to drop stray markdown tokens (** **) so PMs see clean prose.",
+    "(Optional) Use a separate data-testid (e.g. assistant-message-streaming) for the TypingDots placeholder bubble vs the final answer bubble. Currently both share data-testid='assistant-message' which forces tests to poll for non-empty text."
+  ],
+  "critical_code_review_comments": [
+    "server.py logger is configured AFTER it is referenced inside ask_blackbox handler (logger.exception/logger.warning at lines 117/131). The module-level logger object is created on first request only because logging.basicConfig + getLogger run at import bottom (lines 148-152) AFTER api_router is defined but BEFORE app.include_router — works at runtime but is fragile; consider moving logging.basicConfig and logger = ... above the route definitions.",
+    "Blackbox.jsx is 1237 lines — exceeds the 700-line guideline. Split into Overview, AgentDetail, IssueDrilldown, WeeklyReport, AskBlackboxPanel files plus a shared constants module for maintainability.",
+    "AskBlackboxPanel keeps full conversation in component state only — closing+reopening preserves it because the component stays mounted, but a full page reload loses everything. Acceptable for MVP, but call out if persistence across reloads is desired (could use sessionStorage with the session_id).",
+    "PDF generated via html2canvas is ~6.4 MB for a single weekly report (likely a giant rasterised image). Consider compressing the canvas (toDataURL('image/jpeg', 0.85)) instead of PNG — typical 70–90% size reduction with no visible quality loss in PM reports.",
+    "/api/ask catches LLM errors and returns 502 with raw exception text in detail (line 118). This can leak internal error details / API keys in tracebacks to the client; sanitize or return a generic message and log full exception only server-side."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (created)",
+    "/app/backend/tests/__init__.py (created)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all flows: panel open, suggestion send w/ typing animation, manual send w/ disabled+spinner state, session reuse via 2-message exchange, history persistence after close/reopen, weekly report nav, PDF download w/ button state transitions, week-context refresh)"},
+  "test_credentials": "N/A — no auth in this app.",
+  "seed_data_creation": "None. Tests use TEST_-prefixed transient docs in status_checks and one transient ask_logs doc that is deleted at end of test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Pytest suite at /app/backend/tests/backend_test.py covers all 4 endpoints (GET /api/, POST /api/status, GET /api/status, POST /api/ask) including 400/422 validation and Mongo persistence (ask_logs). Use it as regression. For the Ask UI: the streaming placeholder shares data-testid='assistant-message' with the final answer bubble — wait for non-empty inner_text rather than presence. The Emergent badge (id='emergent-badge', bottom-left) intercepts pointer events on the floating Ask panel send button — use force=True on click or hide the badge via JS. PDF download works with page.expect_download(); filename pattern is Blackbox_Weekly_<week-label-with-_>_<year>.pdf.",
+  "rca of the issue": "No bugs to RCA — all tests passed."
+}
