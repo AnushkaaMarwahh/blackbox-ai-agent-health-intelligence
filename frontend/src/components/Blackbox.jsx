@@ -421,11 +421,12 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
     <div data-testid="overview-screen">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
-          <h1 style={{ fontSize: 26, fontWeight: 700, color: COLORS.text, margin: 0, fontFamily: FONT }}>Agent Overview</h1>
-          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0" }}>{WEEKS[weekIdx].label}, 2026</p>
+          <h1 style={{ fontSize: 30, fontWeight: 800, color: COLORS.text, margin: 0, fontFamily: FONT, letterSpacing: -0.6 }}>Agent Overview</h1>
+          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 500 }}>{WEEKS[weekIdx].label}, 2026</p>
         </div>
-        <button onClick={onReport} data-testid="view-weekly-report-btn" style={{ padding: "10px 20px", background: COLORS.accent, border: "none", borderRadius: 10, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: FONT, boxShadow: "0 2px 8px rgba(79,70,229,0.25)", transition: "transform 0.15s" }}
-          onMouseOver={e => e.target.style.transform = "translateY(-1px)"} onMouseOut={e => e.target.style.transform = "translateY(0)"}>
+        <button onClick={onReport} data-testid="view-weekly-report-btn" style={{ padding: "11px 22px", background: COLORS.accent, border: "none", borderRadius: 12, color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT, boxShadow: "0 6px 18px rgba(79,70,229,0.35)", transition: "transform 0.15s, box-shadow 0.15s", letterSpacing: 0.2 }}
+          onMouseOver={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 10px 24px rgba(79,70,229,0.45)"; }}
+          onMouseOut={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(79,70,229,0.35)"; }}>
           View Weekly Report
         </button>
       </div>
@@ -439,9 +440,9 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
           { label: "Open Issues", value: issueCount, color: issueCount > 2 ? COLORS.bad : COLORS.warn },
         ].map((c, i) => (
           <Card key={i} style={{ padding: 20 }}>
-            <div style={{ fontSize: 11, color: COLORS.textTertiary, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>{c.label}</div>
+            <div style={{ fontSize: 11, color: COLORS.textTertiary, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>{c.label}</div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <span style={{ fontSize: 28, fontWeight: 700, color: c.color, fontFamily: MONO, transition: "color 0.3s" }}>{c.value}</span>
+              <span style={{ fontSize: 32, fontWeight: 800, color: c.color, fontFamily: MONO, transition: "color 0.3s", letterSpacing: -0.5 }}>{c.value}</span>
               {c.extra}
             </div>
           </Card>
@@ -454,10 +455,10 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
             <ScoreRing score={a.score} size={56} strokeWidth={5} />
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
-                <span style={{ fontSize: 15, fontWeight: 600, color: COLORS.text }}>{a.name}</span>
+                <span style={{ fontSize: 16, fontWeight: 700, color: COLORS.text, letterSpacing: -0.2 }}>{a.name}</span>
                 <Badge status={a.status} />
               </div>
-              <span style={{ fontSize: 13, color: COLORS.textSecondary }}>{generateStatusLine(a.name, a.score, a.prevScore, a.weekData.issues)}</span>
+              <span style={{ fontSize: 13, color: COLORS.textSecondary, fontWeight: 500 }}>{generateStatusLine(a.name, a.score, a.prevScore, a.weekData.issues)}</span>
             </div>
             <div style={{ height: 36 }}>
               <ResponsiveContainer width="100%" height="100%">
@@ -881,6 +882,16 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
 // ═══════════════════════════════════════════════════════════════
 
 // Hook: progressively reveal an incoming string char-by-char
+const sanitizeAnswer = (s = "") =>
+  s
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\s—\s/g, ", ")
+    .replace(/—/g, ", ")
+    .replace(/\s–\s/g, ", ")
+    .replace(/–/g, ", ")
+    .replace(/,\s*,/g, ",")
+    .trim();
+
 const useTypewriter = (fullText, speedMs = 12) => {
   const [shown, setShown] = useState("");
   const [done, setDone] = useState(true);
@@ -1001,7 +1012,7 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
         // Replace the last assistant placeholder
         const lastIdx = next.findLastIndex(x => x.role === "assistant");
         if (lastIdx >= 0) {
-          next[lastIdx] = { role: "assistant", text: res.data.answer, streaming: false };
+          next[lastIdx] = { role: "assistant", text: sanitizeAnswer(res.data.answer), streaming: false };
         }
         return next;
       });
@@ -1050,8 +1061,8 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800 }}>✦</div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: COLORS.text, lineHeight: 1.2 }}>Ask Blackbox</div>
-              <div style={{ fontSize: 11, color: COLORS.textTertiary }}>Claude Sonnet 4.5 · {WEEKS[weekIdx].label}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: COLORS.text, lineHeight: 1.2, letterSpacing: -0.2 }}>Ask Blackbox</div>
+              <div style={{ fontSize: 11, color: COLORS.textTertiary, fontWeight: 500 }}>Your AI analyst · {WEEKS[weekIdx].label}</div>
             </div>
           </div>
           <button onClick={onClose} data-testid="close-ask-btn" style={{
@@ -1122,7 +1133,7 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
             </button>
           </div>
           <div style={{ fontSize: 10.5, color: COLORS.textTertiary, marginTop: 6, paddingLeft: 2 }}>
-            Enter to send · Shift+Enter for newline · Powered by Claude
+            Press Enter to send · Shift+Enter for newline
           </div>
         </div>
       </aside>
@@ -1163,8 +1174,59 @@ export default function Blackbox() {
         @keyframes bbPulse { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
         @keyframes bbCaret { 50% { opacity: 0; } }
         @keyframes bbSpin { to { transform: rotate(360deg); } }
+        @keyframes bbGlow {
+          0%, 100% { box-shadow: 0 4px 14px rgba(79,70,229,0.35), 0 0 0 0 rgba(124,58,237,0.55); }
+          50%      { box-shadow: 0 6px 22px rgba(79,70,229,0.55), 0 0 0 10px rgba(124,58,237,0); }
+        }
+        @keyframes bbSparkleSpin { to { transform: rotate(360deg); } }
+        @keyframes bbShine {
+          0%   { transform: translateX(-120%) skewX(-20deg); }
+          60%  { transform: translateX(220%) skewX(-20deg); }
+          100% { transform: translateX(220%) skewX(-20deg); }
+        }
         .bb-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:${COLORS.accent}; animation: bbPulse 1.1s infinite ease-in-out both; }
         .bb-spinner { display:inline-block; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation: bbSpin 0.7s linear infinite; }
+
+        /* Hero Ask Blackbox button */
+        .bb-ask-cta {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          padding: 11px 22px;
+          border-radius: 999px;
+          background: linear-gradient(120deg, #4F46E5 0%, #7C3AED 50%, #DB2777 100%);
+          background-size: 200% 200%;
+          background-position: 0% 50%;
+          border: none;
+          color: #fff;
+          font-size: 13.5px;
+          font-weight: 800;
+          letter-spacing: 0.2px;
+          font-family: ${FONT};
+          cursor: pointer;
+          overflow: hidden;
+          transition: transform 0.18s ease, background-position 0.6s ease;
+          animation: bbGlow 2.6s ease-in-out infinite;
+        }
+        .bb-ask-cta:hover { transform: translateY(-1px) scale(1.02); background-position: 100% 50%; }
+        .bb-ask-cta:active { transform: translateY(0) scale(0.99); }
+        .bb-ask-cta .bb-spark { display:inline-block; font-size: 14px; animation: bbSparkleSpin 6s linear infinite; }
+        .bb-ask-cta::after {
+          content: "";
+          position: absolute;
+          top: 0; left: 0;
+          width: 40%; height: 100%;
+          background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.45) 50%, transparent 100%);
+          animation: bbShine 3.2s ease-in-out infinite;
+          pointer-events: none;
+        }
+
+        /* Hide platform-injected "Made with Emergent" badge */
+        #emergent-badge,
+        [id^="emergent-badge"],
+        a[href*="emergent.sh"],
+        iframe[src*="emergent"] { display: none !important; visibility: hidden !important; opacity: 0 !important; pointer-events: none !important; }
       `}</style>
 
       {/* Top bar */}
@@ -1182,18 +1244,8 @@ export default function Blackbox() {
           <span style={{ fontSize: 11, color: COLORS.textTertiary, marginLeft: 2, fontWeight: 500 }}>Agent Health Intelligence</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <button onClick={() => setAskOpen(true)} data-testid="open-ask-btn" style={{
-            display: "flex", alignItems: "center", gap: 6,
-            padding: "7px 14px", borderRadius: 999,
-            background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`,
-            border: "none", color: "#fff", fontSize: 12.5, fontWeight: 600,
-            cursor: "pointer", fontFamily: FONT,
-            boxShadow: "0 2px 10px rgba(79,70,229,0.3)",
-            transition: "transform 0.15s",
-          }}
-          onMouseOver={e => e.currentTarget.style.transform = "translateY(-1px)"}
-          onMouseOut={e => e.currentTarget.style.transform = "translateY(0)"}>
-            <span style={{ fontSize: 13 }}>✦</span> Ask Blackbox
+          <button onClick={() => setAskOpen(true)} data-testid="open-ask-btn" className="bb-ask-cta">
+            <span className="bb-spark">✦</span> Ask Blackbox
           </button>
           <span style={{ fontSize: 12, color: COLORS.textSecondary }}>Jennifer's Workspace</span>
           <div style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>J</div>
