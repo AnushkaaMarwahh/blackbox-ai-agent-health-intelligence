@@ -1,14 +1,7 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import axios from "axios";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
-// On Vercel (single deployment) BACKEND_URL is empty, so we hit the same
-// origin via a relative path. Locally on Emergent it's set, so we use the
-// absolute preview URL. Both flows hit the same FastAPI surface.
-const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -203,49 +196,6 @@ const generateStatusLine = (name, score, prevScore, issues) => {
   if (diff > 0) return `Improving. Up ${diff} points from last week.`;
   if (diff === 0) return "Stable. No significant changes.";
   return issues.length > 0 ? issues[0].title : `Down ${Math.abs(diff)} points from last week.`;
-};
-
-// Build the textual context that we send to Claude for "Pulse"
-const buildAskContext = (weekIdx, weights) => {
-  const week = WEEKS[weekIdx];
-  const lines = [];
-  lines.push(`Reporting Period: ${week.label} (current week)`);
-  lines.push(`Health Score Weights: completion=${weights.completion}, satisfaction=${weights.satisfaction}, cost=${weights.cost}, compliance=${weights.compliance}`);
-  lines.push("");
-
-  const summaries = AGENTS_META.map(a => {
-    const endIdx = week.endIdx;
-    const dims = getDims(a.id, endIdx);
-    const score = calcHealth(dims, weights);
-    const prev = calcHealth(getDims(a.id, endIdx - 1), weights);
-    const wd = a.weekly[weekIdx];
-    return { a, dims, score, prev, wd };
-  });
-
-  const overall = Math.round(summaries.reduce((s, x) => s + x.score, 0) / summaries.length);
-  const prevOverall = Math.round(summaries.reduce((s, x) => s + x.prev, 0) / summaries.length);
-  lines.push(`Overall Health: ${overall} (prev ${prevOverall}, change ${overall - prevOverall})`);
-  lines.push("");
-
-  summaries.forEach(({ a, dims, score, prev, wd }) => {
-    lines.push(`AGENT: ${a.name} [${a.type}]`);
-    lines.push(`  Health Score: ${score} (prev ${prev}, change ${score - prev}) — Status: ${statusLabel(statusOf(score))}`);
-    lines.push(`  Dimensions — completion: ${dims.completion}, satisfaction: ${dims.satisfaction}, cost: ${dims.cost}, compliance: ${dims.compliance}`);
-    lines.push(`  Conversations: ${wd.convTotal} total, ${wd.convFailed} failed`);
-    lines.push(`  Cost per resolution: $${wd.costPer.toFixed(2)} (prev $${wd.prevCostPer.toFixed(2)})`);
-    if (wd.issues.length === 0) {
-      lines.push(`  Issues: none`);
-    } else {
-      lines.push(`  Issues (${wd.issues.length}):`);
-      wd.issues.forEach(i => {
-        lines.push(`    - [${i.severity.toUpperCase()}] ${i.title} | metric=${i.metric} | impact=${i.impact} | affected=${i.affected} conversations`);
-        lines.push(`      detail: ${i.detail}`);
-        lines.push(`      recommendation: ${i.recommendation}`);
-      });
-    }
-    lines.push("");
-  });
-  return lines.join("\n");
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -741,37 +691,119 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
   const [pdfStatus, setPdfStatus] = useState("idle"); // idle | rendering | done | error
   const reportRef = useRef(null);
 
-  const agents = useMemo(() => AGENTS_META.map(a => {
+  // ═══ Compute everything once ═══
+  const data = useMemo(() => {
     const endIdx = WEEKS[weekIdx].endIdx;
-    const dims = getDims(a.id, endIdx);
-    const score = calcHealth(dims, weights);
-    const prevScore = calcHealth(getDims(a.id, endIdx - 1), weights);
-    const wd = a.weekly[weekIdx];
-    return { name: a.name, score, prevScore, status: statusOf(score), issues: wd.issues, convTotal: wd.convTotal };
-  }), [weekIdx, weights]);
 
-  const overall = Math.round(agents.reduce((s, a) => s + a.score, 0) / agents.length);
-  const prevOverall = Math.round(agents.reduce((s, a) => s + a.prevScore, 0) / agents.length);
+    const agents = AGENTS_META.map(a => {
+      const dims = getDims(a.id, endIdx);
+      const prevDims = getDims(a.id, endIdx - 1);
+      const score = calcHealth(dims, weights);
+      const prevScore = calcHealth(prevDims, weights);
+      const wd = a.weekly[weekIdx];
+      const prevWd = weekIdx > 0 ? a.weekly[weekIdx - 1] : wd;
+      const failRate = wd.convTotal > 0 ? wd.convFailed / wd.convTotal : 0;
+      const prevFailRate = prevWd.convTotal > 0 ? prevWd.convFailed / prevWd.convTotal : 0;
+      const resolutionRate = 1 - failRate;
+      const totalCost = wd.convTotal * wd.costPer;
+      const prevTotalCost = prevWd.convTotal * prevWd.prevCostPer;
+      return {
+        id: a.id, name: a.name, type: a.type,
+        dims, prevDims, score, prevScore, status: statusOf(score),
+        issues: wd.issues, convTotal: wd.convTotal, convFailed: wd.convFailed,
+        prevConvTotal: prevWd.convTotal, prevConvFailed: prevWd.convFailed,
+        failRate, prevFailRate, resolutionRate,
+        costPer: wd.costPer, prevCostPer: wd.prevCostPer,
+        totalCost, prevTotalCost,
+      };
+    });
 
-  const allIssues = agents.flatMap(a => a.issues.map(i => ({ ...i, agent: a.name })));
-  const priorities = allIssues.filter(i => i.severity !== "low").sort((a, b) => a.severity === "high" ? -1 : 1);
+    const overall = Math.round(agents.reduce((s, a) => s + a.score, 0) / agents.length);
+    const prevOverall = Math.round(agents.reduce((s, a) => s + a.prevScore, 0) / agents.length);
+    const totalConv = agents.reduce((s, a) => s + a.convTotal, 0);
+    const prevTotalConv = agents.reduce((s, a) => s + a.prevConvTotal, 0);
+    const totalFailed = agents.reduce((s, a) => s + a.convFailed, 0);
+    const prevTotalFailed = agents.reduce((s, a) => s + a.prevConvFailed, 0);
+    const totalCost = agents.reduce((s, a) => s + a.totalCost, 0);
+    const prevTotalCost = agents.reduce((s, a) => s + a.prevTotalCost, 0);
+
+    const allIssues = agents.flatMap(a => a.issues.map(i => ({ ...i, agentName: a.name, agentId: a.id })));
+    const sevOrder = { high: 0, medium: 1, low: 2 };
+    const issuesSorted = [...allIssues].sort((x, y) => sevOrder[x.severity] - sevOrder[y.severity]);
+    const issueCounts = {
+      high: allIssues.filter(i => i.severity === "high").length,
+      medium: allIssues.filter(i => i.severity === "medium").length,
+      low: allIssues.filter(i => i.severity === "low").length,
+    };
+    const priorities = issuesSorted.filter(i => i.severity !== "low");
+
+    // Weakest dimension across all agents
+    const dimAvgs = ["completion", "satisfaction", "cost", "compliance"].map(k => ({
+      key: k,
+      label: { completion: "Task Completion", satisfaction: "User Satisfaction", cost: "Cost Efficiency", compliance: "Policy Compliance" }[k],
+      avg: Math.round(agents.reduce((s, a) => s + a.dims[k], 0) / agents.length),
+    }));
+    const weakestDim = [...dimAvgs].sort((a, b) => a.avg - b.avg)[0];
+
+    // Worst & best agent
+    const worstAgent = [...agents].sort((a, b) => a.score - b.score)[0];
+    const bestAgent = [...agents].sort((a, b) => b.score - a.score)[0];
+    const biggestDrop = [...agents].sort((a, b) => (a.score - a.prevScore) - (b.score - b.prevScore))[0];
+    const biggestGain = [...agents].sort((a, b) => (b.score - b.prevScore) - (a.score - a.prevScore))[0];
+
+    return {
+      agents, overall, prevOverall,
+      totalConv, prevTotalConv, totalFailed, prevTotalFailed,
+      totalCost, prevTotalCost,
+      issueCounts, issuesSorted, priorities,
+      dimAvgs, weakestDim, worstAgent, bestAgent, biggestDrop, biggestGain,
+    };
+  }, [weekIdx, weights]);
+
+  // ═══ Auto-generated executive narrative ═══
+  const narrative = useMemo(() => {
+    const overallDelta = data.overall - data.prevOverall;
+    const verdict = data.overall >= 85 ? "healthy" : data.overall >= 75 ? "watching closely" : "needs attention";
+    const pieces = [];
+    if (overallDelta < 0) {
+      const drop = Math.abs(overallDelta);
+      pieces.push(`Overall fleet health dropped ${drop} point${drop === 1 ? "" : "s"} this week to ${data.overall}, primarily driven by ${data.biggestDrop.name} (${data.biggestDrop.score - data.biggestDrop.prevScore} pts).`);
+    } else if (overallDelta > 0) {
+      pieces.push(`Overall fleet health rose ${overallDelta} point${overallDelta === 1 ? "" : "s"} this week to ${data.overall}, led by ${data.biggestGain.name} (+${data.biggestGain.score - data.biggestGain.prevScore} pts).`);
+    } else {
+      pieces.push(`Overall fleet health is stable at ${data.overall}, ${verdict}.`);
+    }
+    pieces.push(`${data.weakestDim.label} is the weakest dimension across the fleet at ${data.weakestDim.avg}.`);
+    if (data.totalCost > data.prevTotalCost) {
+      const pct = Math.round(((data.totalCost - data.prevTotalCost) / data.prevTotalCost) * 100);
+      pieces.push(`Total weekly cost rose ${pct}% to $${Math.round(data.totalCost).toLocaleString()}.`);
+    } else if (data.totalCost < data.prevTotalCost) {
+      const pct = Math.round(((data.prevTotalCost - data.totalCost) / data.prevTotalCost) * 100);
+      pieces.push(`Total weekly cost fell ${pct}% to $${Math.round(data.totalCost).toLocaleString()}.`);
+    }
+    if (data.issueCounts.high > 0) {
+      pieces.push(`${data.issueCounts.high} high-severity issue${data.issueCounts.high > 1 ? "s" : ""} ${data.issueCounts.high === 1 ? "needs" : "need"} immediate attention.`);
+    }
+    return pieces.join(" ");
+  }, [data]);
 
   const copyText = useCallback(() => {
-    const diff = overall - prevOverall;
-    const arrow = diff > 0 ? `↑+${diff}` : diff < 0 ? `↓${diff}` : "→0";
-    let txt = `Blackbox Weekly Report — ${WEEKS[weekIdx].label}\nOverall Health: ${overall} (${arrow})\n\n`;
-    agents.forEach(a => {
-      const d = a.score - a.prevScore;
-      const ar = d > 0 ? `↑+${d}` : d < 0 ? `↓${d}` : "→0";
-      txt += `${a.name}: ${a.score} (${ar}) — ${statusLabel(a.status)}\n`;
-      a.issues.forEach(i => { txt += `  • ${i.title}\n`; });
+    const arrow = (n) => n > 0 ? `+${n}` : n < 0 ? `${n}` : "0";
+    let txt = `Blackbox Weekly Report — ${WEEKS[weekIdx].label}\n\n`;
+    txt += `EXECUTIVE SUMMARY\n${narrative}\n\n`;
+    txt += `KPIs\nHealth ${data.overall} (${arrow(data.overall - data.prevOverall)}) | Conversations ${data.totalConv.toLocaleString()} (${arrow(data.totalConv - data.prevTotalConv)}) | Failed ${data.totalFailed} | Cost $${Math.round(data.totalCost).toLocaleString()}\n\n`;
+    txt += `BY AGENT\n`;
+    data.agents.forEach(a => {
+      txt += `${a.name}: health ${a.score} (${arrow(a.score - a.prevScore)}), ${a.convTotal.toLocaleString()} conv, ${a.convFailed} failed, $${a.costPer.toFixed(2)}/res, ${a.issues.length} issue${a.issues.length !== 1 ? "s" : ""}\n`;
     });
-    if (priorities.length > 0) {
-      txt += `\nTop Priorities:\n`;
-      priorities.forEach((p, i) => { txt += `${i+1}. [${p.severity.charAt(0).toUpperCase() + p.severity.slice(1)}] ${p.recommendation.split(".")[0]} (${p.agent})\n`; });
+    if (data.priorities.length > 0) {
+      txt += `\nPRIORITY ACTIONS\n`;
+      data.priorities.forEach((p, i) => {
+        txt += `${i + 1}. [${p.severity.toUpperCase()}] ${p.recommendation.split(".")[0]} (${p.agentName})\n`;
+      });
     }
     navigator.clipboard.writeText(txt).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
-  }, [agents, overall, prevOverall, priorities, weekIdx]);
+  }, [data, narrative, weekIdx]);
 
   const onDownloadPdf = useCallback(() => {
     exportReportPdf({ weekIdx, weights, reportEl: reportRef.current, setStatus: setPdfStatus });
@@ -780,33 +812,57 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
   const pdfBtnLabel = pdfStatus === "rendering" ? "Generating…" : pdfStatus === "done" ? "✓ Downloaded" : pdfStatus === "error" ? "Try again" : "Download PDF";
   const pdfDisabled = pdfStatus === "rendering";
 
+  // ═══ Small helpers used inside render ═══
+  const Delta = ({ value, suffix = "", invert = false }) => {
+    if (value === 0) return <span style={{ color: COLORS.textTertiary, fontSize: 12, fontFamily: MONO }}>→ 0{suffix}</span>;
+    const positive = invert ? value < 0 : value > 0;
+    const color = positive ? COLORS.good : COLORS.bad;
+    const sign = value > 0 ? "+" : "";
+    const arrow = value > 0 ? "↑" : "↓";
+    return <span style={{ color, fontSize: 12, fontWeight: 700, fontFamily: MONO }}>{arrow}{sign}{value}{suffix}</span>;
+  };
+
+  const HeatCell = ({ score, prev }) => {
+    const color = scoreColor(score);
+    const bg = score >= 85 ? COLORS.goodBg : score >= 75 ? COLORS.warnBg : COLORS.badBg;
+    const delta = score - prev;
+    return (
+      <div style={{ background: bg, borderRadius: 8, padding: "8px 10px", textAlign: "center" }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color, fontFamily: MONO, lineHeight: 1 }}>{score}</div>
+        <div style={{ fontSize: 10, color: delta === 0 ? COLORS.textTertiary : delta > 0 ? COLORS.good : COLORS.bad, fontFamily: MONO, marginTop: 2, fontWeight: 600 }}>
+          {delta > 0 ? `+${delta}` : delta === 0 ? "—" : delta}
+        </div>
+      </div>
+    );
+  };
+
+  const SectionTitle = ({ children, hint }) => (
+    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+      <h3 style={{ fontSize: 13, color: COLORS.text, margin: 0, textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 800 }}>{children}</h3>
+      {hint && <span style={{ fontSize: 11, color: COLORS.textTertiary, fontWeight: 500 }}>{hint}</span>}
+    </div>
+  );
+
   return (
     <div data-testid="weekly-report-screen">
       <BackBtn onClick={onBack} label="Back to Overview" />
       <div className="bb-report-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: COLORS.text, margin: 0, fontFamily: FONT }}>Weekly Report</h1>
-          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 600, letterSpacing: 0.3, textTransform: "uppercase" }}>{WEEKS[weekIdx].label}</p>
+          <h1 style={{ fontSize: 26, fontWeight: 800, color: COLORS.text, margin: 0, fontFamily: FONT, letterSpacing: -0.5 }}>Weekly Report</h1>
+          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>{WEEKS[weekIdx].label} · {data.agents.length} agents</p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11, color: COLORS.textTertiary, marginBottom: 2 }}>Overall Health</div>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <span style={{ fontSize: 28, fontWeight: 700, color: scoreColor(overall), fontFamily: MONO }}>{overall}</span>
-              <TrendArrow current={overall} previous={prevOverall} />
-            </div>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button onClick={copyText} data-testid="copy-summary-btn" style={{
             padding: "10px 16px", borderRadius: 10, border: `1px solid ${copied ? COLORS.goodBorder : COLORS.border}`,
             background: copied ? COLORS.goodBg : COLORS.surface, color: copied ? COLORS.good : COLORS.textSecondary,
-            fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: FONT, transition: "all 0.2s",
+            fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT, transition: "all 0.2s",
           }}>{copied ? "✓ Copied" : "Copy Summary"}</button>
           <button onClick={onDownloadPdf} disabled={pdfDisabled} data-testid="download-pdf-btn" style={{
             padding: "10px 16px", borderRadius: 10, border: "none",
             background: pdfStatus === "done" ? COLORS.good : pdfStatus === "error" ? COLORS.bad : COLORS.accent,
             color: "#fff",
-            fontSize: 13, fontWeight: 600, cursor: pdfDisabled ? "wait" : "pointer", fontFamily: FONT,
-            boxShadow: "0 2px 8px rgba(79,70,229,0.25)", transition: "all 0.2s",
+            fontSize: 13, fontWeight: 700, cursor: pdfDisabled ? "wait" : "pointer", fontFamily: FONT,
+            boxShadow: "0 4px 14px rgba(79,70,229,0.3)", transition: "all 0.2s",
             display: "flex", alignItems: "center", gap: 8, opacity: pdfDisabled ? 0.85 : 1,
           }}>
             {pdfStatus === "rendering" && <span className="bb-spinner" style={{ width: 12, height: 12 }} />}
@@ -817,60 +873,152 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
 
       {/* Capture region for PDF */}
       <div ref={reportRef} data-testid="report-capture-region" style={{ background: "transparent" }}>
-        <div className="bb-report-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 16 }}>
-          {agents.map(a => (
-            <Card key={a.name} style={{ padding: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: COLORS.text, marginBottom: 4 }}>{a.name}</div>
-                  <Badge status={a.status} />
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 24, fontWeight: 700, color: scoreColor(a.score), fontFamily: MONO }}>{a.score}</div>
-                  <TrendArrow current={a.score} previous={a.prevScore} />
-                </div>
-              </div>
-              <div style={{ fontSize: 12, color: COLORS.textSecondary }}>
-                {a.convTotal.toLocaleString()} conversations · {a.issues.length} issue{a.issues.length !== 1 ? "s" : ""}
-              </div>
+
+        {/* ─── 1. EXECUTIVE SUMMARY ─── */}
+        <Card style={{ marginBottom: 16, padding: 24, background: "linear-gradient(135deg, #FFFFFF 0%, #F5F3FF 100%)", borderColor: COLORS.accentMid }}>
+          <SectionTitle hint="Auto-derived from this week's data">Executive Summary</SectionTitle>
+          <p style={{ fontSize: 15, lineHeight: 1.65, color: COLORS.text, margin: 0, fontWeight: 500 }}>
+            {narrative}
+          </p>
+        </Card>
+
+        {/* ─── 2. KPI STRIP (4 cards) ─── */}
+        <div className="bb-kpi-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+          {[
+            { label: "Fleet Health", value: data.overall, delta: data.overall - data.prevOverall, color: scoreColor(data.overall) },
+            { label: "Conversations", value: data.totalConv.toLocaleString(), delta: data.totalConv - data.prevTotalConv, color: COLORS.accent },
+            { label: "Failed", value: data.totalFailed.toLocaleString(), delta: data.totalFailed - data.prevTotalFailed, color: data.totalFailed > data.prevTotalFailed ? COLORS.bad : COLORS.good, invertDelta: true },
+            { label: "Weekly Cost", value: `$${Math.round(data.totalCost).toLocaleString()}`, delta: Math.round(data.totalCost - data.prevTotalCost), color: data.totalCost > data.prevTotalCost ? COLORS.bad : COLORS.good, prefix: "$", invertDelta: true },
+          ].map((k) => (
+            <Card key={k.label} style={{ padding: 16 }}>
+              <div style={{ fontSize: 10.5, color: COLORS.textTertiary, marginBottom: 6, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{k.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: k.color, fontFamily: MONO, marginBottom: 4, lineHeight: 1 }}>{k.value}</div>
+              <Delta value={k.delta} suffix={k.prefix ? "" : ""} invert={!!k.invertDelta} />
             </Card>
           ))}
         </div>
 
+        {/* ─── 3. PERFORMANCE MATRIX (heatmap) ─── */}
         <Card style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 12, color: COLORS.textTertiary, margin: "0 0 14px", textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Key Changes This Week</h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {agents.map((a) => {
-              const diff = a.score - a.prevScore;
-              const icon = diff > 0 ? "↗" : diff < -3 ? "⚠" : "→";
-              const color = diff > 0 ? COLORS.good : diff < -3 ? COLORS.bad : COLORS.textSecondary;
-              return (
-                <div key={a.name} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                  <span style={{ fontSize: 16, color, lineHeight: 1.4, flexShrink: 0 }}>{icon}</span>
-                  <p style={{ fontSize: 14, lineHeight: 1.6, color: COLORS.text, margin: 0 }}>
-                    <strong>{a.name}</strong> {diff > 0 ? `improved to ${a.score} (+${diff})` : diff < 0 ? `dropped to ${a.score} (${diff})` : `stable at ${a.score}`}.
-                    {a.issues.length > 0 ? ` ${a.issues[0].title}.` : " No issues this week."}
-                  </p>
+          <SectionTitle hint="Score (top) and week-over-week change (bottom)">Performance Matrix</SectionTitle>
+          <div className="bb-matrix" style={{ display: "grid", gridTemplateColumns: "1.5fr repeat(4, 1fr) 1fr", gap: 8, alignItems: "center" }}>
+            <div></div>
+            {data.dimAvgs.map(d => (
+              <div key={d.key} style={{ fontSize: 10.5, color: COLORS.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700, textAlign: "center" }}>{d.label}</div>
+            ))}
+            <div style={{ fontSize: 10.5, color: COLORS.text, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 800, textAlign: "center" }}>Health</div>
+
+            {data.agents.map(a => (
+              <React.Fragment key={a.id}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text }}>{a.name}</div>
+                  <div style={{ fontSize: 11, color: COLORS.textTertiary, fontWeight: 500 }}>{a.type}</div>
                 </div>
+                <HeatCell score={a.dims.completion} prev={a.prevDims.completion} />
+                <HeatCell score={a.dims.satisfaction} prev={a.prevDims.satisfaction} />
+                <HeatCell score={a.dims.cost} prev={a.prevDims.cost} />
+                <HeatCell score={a.dims.compliance} prev={a.prevDims.compliance} />
+                <HeatCell score={a.score} prev={a.prevScore} />
+              </React.Fragment>
+            ))}
+
+            <div style={{ fontSize: 11, color: COLORS.textTertiary, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Fleet avg</div>
+            {data.dimAvgs.map(d => (
+              <div key={d.key} style={{ textAlign: "center", fontSize: 13, fontWeight: 700, color: scoreColor(d.avg), fontFamily: MONO }}>{d.avg}</div>
+            ))}
+            <div style={{ textAlign: "center", fontSize: 14, fontWeight: 800, color: scoreColor(data.overall), fontFamily: MONO }}>{data.overall}</div>
+          </div>
+        </Card>
+
+        {/* ─── 4. VOLUME & ECONOMICS ─── */}
+        <Card style={{ marginBottom: 16 }}>
+          <SectionTitle hint={`Total spend $${Math.round(data.totalCost).toLocaleString()} this week`}>Volume & Economics</SectionTitle>
+          <div className="bb-vol-table" style={{ display: "grid", gridTemplateColumns: "1.5fr repeat(4, 1fr)", gap: 8, alignItems: "center" }}>
+            {["Agent", "Conversations", "Failed", "Resolution", "$/Resolution"].map(h => (
+              <div key={h} style={{ fontSize: 10.5, color: COLORS.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700, paddingBottom: 8, borderBottom: `1px solid ${COLORS.border}` }}>{h}</div>
+            ))}
+            {data.agents.map(a => {
+              const costDelta = a.costPer - a.prevCostPer;
+              return (
+                <React.Fragment key={a.id}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text, paddingTop: 6 }}>{a.name}</div>
+                  <div style={{ paddingTop: 6 }}>
+                    <div style={{ fontSize: 14, fontFamily: MONO, fontWeight: 700, color: COLORS.text }}>{a.convTotal.toLocaleString()}</div>
+                    <Delta value={a.convTotal - a.prevConvTotal} />
+                  </div>
+                  <div style={{ paddingTop: 6 }}>
+                    <div style={{ fontSize: 14, fontFamily: MONO, fontWeight: 700, color: a.convFailed > a.prevConvFailed ? COLORS.bad : COLORS.text }}>{a.convFailed}</div>
+                    <Delta value={a.convFailed - a.prevConvFailed} invert />
+                  </div>
+                  <div style={{ paddingTop: 6 }}>
+                    <div style={{ fontSize: 14, fontFamily: MONO, fontWeight: 700, color: scoreColor(a.resolutionRate * 100) }}>{Math.round(a.resolutionRate * 100)}%</div>
+                  </div>
+                  <div style={{ paddingTop: 6 }}>
+                    <div style={{ fontSize: 14, fontFamily: MONO, fontWeight: 700, color: costDelta > 0 ? COLORS.bad : costDelta < 0 ? COLORS.good : COLORS.text }}>${a.costPer.toFixed(2)}</div>
+                    <span style={{ fontSize: 11, fontFamily: MONO, fontWeight: 600, color: costDelta > 0 ? COLORS.bad : costDelta < 0 ? COLORS.good : COLORS.textTertiary }}>
+                      {costDelta > 0 ? "+" : ""}${costDelta.toFixed(2)}
+                    </span>
+                  </div>
+                </React.Fragment>
               );
             })}
           </div>
         </Card>
 
-        {priorities.length > 0 && (
-          <Card style={{ background: COLORS.accentLight, borderColor: COLORS.accentMid }}>
-            <h3 style={{ fontSize: 12, color: COLORS.accent, margin: "0 0 14px", textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Priority Actions</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {priorities.map((p, i) => {
-                const sv = sevStyle(p.severity);
+        {/* ─── 5. ISSUES INVENTORY ─── */}
+        {data.issuesSorted.length > 0 && (
+          <Card style={{ marginBottom: 16 }}>
+            <SectionTitle hint={`${data.issueCounts.high} high · ${data.issueCounts.medium} medium · ${data.issueCounts.low} low`}>Open Issues</SectionTitle>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {data.issuesSorted.map(issue => {
+                const sv = sevStyle(issue.severity);
                 return (
-                  <div key={p.id} style={{ display: "grid", gridTemplateColumns: "72px 1fr", alignItems: "start", gap: 12, padding: "10px 0", borderBottom: i < priorities.length - 1 ? `1px solid ${COLORS.accentMid}` : "none" }}>
-                    <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, textAlign: "center", fontWeight: 600, background: sv.bg, color: sv.color, border: `1px solid ${sv.border}` }}>
-                      {p.severity.charAt(0).toUpperCase() + p.severity.slice(1)}
+                  <div key={issue.id} className="bb-issue-row" style={{
+                    background: sv.bg, border: `1px solid ${sv.border}`, borderRadius: 10,
+                    padding: "10px 14px",
+                    display: "grid", gridTemplateColumns: "70px 1fr auto", alignItems: "center", gap: 12,
+                  }}>
+                    <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 5, textAlign: "center", fontWeight: 800, background: COLORS.surface, color: sv.color, border: `1px solid ${sv.border}`, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                      {issue.severity}
                     </span>
                     <div>
-                      <div style={{ fontSize: 14, color: "#1E1B4B", fontWeight: 500 }}>{p.recommendation.split(".")[0]}.</div>
-                      <div style={{ fontSize: 12, color: COLORS.accent, marginTop: 2 }}>{p.agent}</div>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text }}>{issue.title}</div>
+                      <div style={{ fontSize: 11.5, color: COLORS.textSecondary, marginTop: 2 }}>
+                        {issue.agentName} · {issue.metric} · {issue.affected.toLocaleString()} conversations
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 13, fontFamily: MONO, fontWeight: 800, color: sv.color }}>{issue.impact}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {/* ─── 6. FOCUS FOR NEXT WEEK ─── */}
+        {data.priorities.length > 0 && (
+          <Card style={{ background: "linear-gradient(135deg, #EEF2FF 0%, #FAF5FF 100%)", borderColor: COLORS.accentMid, marginBottom: 16 }}>
+            <SectionTitle hint="Ranked by severity, then impact">Focus for Next Week</SectionTitle>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {data.priorities.slice(0, 5).map((p, i) => {
+                const sv = sevStyle(p.severity);
+                return (
+                  <div key={p.id} className="bb-priority-row" style={{
+                    display: "grid", gridTemplateColumns: "32px 1fr",
+                    gap: 12, alignItems: "start", padding: "10px 0",
+                    borderBottom: i < Math.min(data.priorities.length, 5) - 1 ? `1px solid rgba(79,70,229,0.15)` : "none",
+                  }}>
+                    <div style={{
+                      width: 28, height: 28, borderRadius: 8, background: COLORS.surface,
+                      border: `1px solid ${sv.border}`, color: sv.color,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 13, fontWeight: 800, fontFamily: MONO,
+                    }}>{i + 1}</div>
+                    <div>
+                      <div style={{ fontSize: 14, color: COLORS.text, fontWeight: 600, lineHeight: 1.4 }}>{p.recommendation.split(".")[0]}.</div>
+                      <div style={{ fontSize: 11.5, color: COLORS.accent, marginTop: 4, fontWeight: 600 }}>
+                        {p.agentName} · expected lift on {p.metric.toLowerCase()} · severity {p.severity}
+                      </div>
                     </div>
                   </div>
                 );
@@ -878,350 +1026,13 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
             </div>
           </Card>
         )}
+
       </div>
 
       <div style={{ textAlign: "center", marginTop: 20, fontSize: 12, color: COLORS.textTertiary }}>
         Share-ready: copy the summary, download a PDF, or screenshot for your meeting doc.
       </div>
     </div>
-  );
-};
-
-// ═══════════════════════════════════════════════════════════════
-// ASK BLACKBOX — Claude-powered Q&A panel with typing animation
-// ═══════════════════════════════════════════════════════════════
-
-// Hook: progressively reveal an incoming string char-by-char
-const sanitizeAnswer = (s = "") =>
-  s
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/\s—\s/g, ", ")
-    .replace(/—/g, ", ")
-    .replace(/\s–\s/g, ", ")
-    .replace(/–/g, ", ")
-    .replace(/,\s*,/g, ",")
-    .trim();
-
-const useTypewriter = (fullText, speedMs = 12) => {
-  const [shown, setShown] = useState("");
-  const [done, setDone] = useState(true);
-  useEffect(() => {
-    if (!fullText) { setShown(""); setDone(true); return; }
-    setShown("");
-    setDone(false);
-    let i = 0;
-    const id = setInterval(() => {
-      i += Math.max(1, Math.floor(fullText.length / 600)); // adaptive: long answers reveal a touch faster
-      if (i >= fullText.length) {
-        setShown(fullText);
-        setDone(true);
-        clearInterval(id);
-      } else {
-        setShown(fullText.slice(0, i));
-      }
-    }, speedMs);
-    return () => clearInterval(id);
-  }, [fullText, speedMs]);
-  return { shown, done };
-};
-
-const SuggestedChips = ({ onPick, disabled }) => {
-  const suggestions = [
-    { label: "Who needs my attention?", icon: "▲" },
-    { label: "Why is the cost up?", icon: "$" },
-    { label: "Top 3 priorities", icon: "★" },
-    { label: "Trend snapshot", icon: "≋" },
-  ];
-  const queries = [
-    "Which agent needs my attention this week?",
-    "What is driving the cost spike on the Support Bot?",
-    "Summarize the top 3 priorities for the next standup.",
-    "Give me a trend snapshot across all agents.",
-  ];
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
-      {suggestions.map((s, i) => (
-        <button key={s.label} disabled={disabled} onClick={() => onPick(queries[i])} data-testid={`ask-suggestion-${i}`} style={{
-          fontSize: 12, padding: "10px 12px", borderRadius: 10,
-          background: "rgba(255,255,255,0.65)", color: "#1E1B4B",
-          border: "1px solid rgba(99,102,241,0.25)",
-          backdropFilter: "blur(6px)",
-          cursor: disabled ? "not-allowed" : "pointer",
-          fontFamily: FONT, fontWeight: 600,
-          opacity: disabled ? 0.5 : 1, transition: "all 0.18s",
-          textAlign: "left", display: "flex", alignItems: "center", gap: 8,
-          boxShadow: "0 1px 0 rgba(255,255,255,0.7) inset, 0 1px 2px rgba(15,23,42,0.04)",
-        }}
-        onMouseOver={e => !disabled && (e.currentTarget.style.transform = "translateY(-1px)", e.currentTarget.style.borderColor = "rgba(99,102,241,0.55)", e.currentTarget.style.background = "rgba(255,255,255,0.95)")}
-        onMouseOut={e => !disabled && (e.currentTarget.style.transform = "translateY(0)", e.currentTarget.style.borderColor = "rgba(99,102,241,0.25)", e.currentTarget.style.background = "rgba(255,255,255,0.65)")}>
-          <span style={{ color: "#7C3AED", fontWeight: 800 }}>{s.icon}</span>
-          {s.label}
-        </button>
-      ))}
-    </div>
-  );
-};
-
-const TypingDots = () => (
-  <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }} aria-label="Thinking">
-    <span className="bb-dot" style={{ animationDelay: "0s" }} />
-    <span className="bb-dot" style={{ animationDelay: "0.15s" }} />
-    <span className="bb-dot" style={{ animationDelay: "0.3s" }} />
-  </div>
-);
-
-const AssistantBubble = ({ text, streaming }) => {
-  const { shown, done } = useTypewriter(streaming ? "" : text, 10);
-  return (
-    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", maxWidth: "92%", alignSelf: "flex-start" }}>
-      <div style={{
-        width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-        background: "linear-gradient(135deg, #4F46E5, #7C3AED)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        color: "#fff", fontSize: 13, fontWeight: 800,
-        boxShadow: "0 2px 8px rgba(79,70,229,0.35)",
-      }}>P</div>
-      <div data-testid="assistant-message" style={{
-        background: "#FFFFFF", border: "1px solid rgba(99,102,241,0.18)",
-        borderRadius: "4px 14px 14px 14px", padding: "11px 14px",
-        color: "#1E293B", fontSize: 13.5, lineHeight: 1.65,
-        whiteSpace: "pre-wrap", flex: 1,
-        boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
-      }}>
-        {streaming ? (
-          <TypingDots />
-        ) : (
-          <>
-            {shown}
-            {!done && <span style={{
-              display: "inline-block", width: 7, height: 14, marginLeft: 2,
-              background: "#7C3AED", verticalAlign: "text-bottom",
-              animation: "bbCaret 0.9s steps(2) infinite",
-            }} />}
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const UserBubble = ({ text }) => (
-  <div data-testid="user-message" style={{
-    background: "linear-gradient(135deg, #312E81 0%, #4F46E5 100%)",
-    color: "#fff", borderRadius: "14px 4px 14px 14px",
-    padding: "10px 14px", fontSize: 13.5, lineHeight: 1.55,
-    maxWidth: "85%", alignSelf: "flex-end", fontWeight: 500,
-    boxShadow: "0 4px 14px rgba(79,70,229,0.28)",
-  }}>{text}</div>
-);
-
-const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
-  const [messages, setMessages] = useState([]); // {role:'user'|'assistant', text, streaming?}
-  const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState(null);
-  const scrollRef = useRef(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, pending]);
-
-  const send = useCallback(async (rawQ) => {
-    const q = (rawQ ?? input).trim();
-    if (!q || pending) return;
-    setError(null);
-    const userId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const placeholderId = `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setMessages(m => [
-      ...m,
-      { id: userId, role: "user", text: q },
-      { id: placeholderId, role: "assistant", text: "", streaming: true },
-    ]);
-    setInput("");
-    setPending(true);
-    try {
-      const ctx = buildAskContext(weekIdx, weights);
-      const res = await axios.post(`${API}/ask`, {
-        question: q, context: ctx, session_id: sessionId,
-      }, { timeout: 60000 });
-      setSessionId(res.data.session_id);
-      setMessages(m => m.map(msg =>
-        msg.id === placeholderId
-          ? { ...msg, text: sanitizeAnswer(res.data.answer), streaming: false }
-          : msg
-      ));
-    } catch (e) {
-      const msg = e.response?.data?.detail || e.message || "Something went wrong.";
-      setError(msg);
-      setMessages(m => m.filter(x => x.id !== placeholderId));
-    } finally {
-      setPending(false);
-    }
-  }, [input, pending, sessionId, weekIdx, weights]);
-
-  const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
-  };
-
-  if (!open) return null;
-
-  return (
-    <>
-      {/* Subtle backdrop — does NOT block, just darkens slightly */}
-      <div data-testid="ask-backdrop" onClick={onClose} style={{
-        position: "fixed", inset: 0, background: "rgba(15,23,42,0.18)",
-        zIndex: 200, animation: "bbFade 0.18s ease",
-      }} />
-      {/* Floating bottom-right card */}
-      <aside data-testid="ask-blackbox-panel" className="bb-pulse-panel" style={{
-        position: "fixed", bottom: 24, right: 24,
-        width: "min(460px, calc(100vw - 32px))",
-        height: "min(640px, calc(100vh - 48px))",
-        background: "#FAF8F4",
-        borderRadius: 20, zIndex: 201,
-        display: "flex", flexDirection: "column",
-        boxShadow: "0 24px 60px rgba(15,23,42,0.32), 0 0 0 1px rgba(255,255,255,0.5)",
-        animation: "bbPopIn 0.28s cubic-bezier(0.16,1,0.3,1)",
-        fontFamily: FONT, overflow: "hidden",
-      }}>
-        {/* Dark gradient header */}
-        <div style={{
-          padding: "18px 20px",
-          background: "linear-gradient(135deg, #0F172A 0%, #312E81 55%, #4F46E5 100%)",
-          color: "#fff", position: "relative",
-        }}>
-          {/* Decorative grain */}
-          <div style={{
-            position: "absolute", inset: 0, opacity: 0.18, pointerEvents: "none",
-            backgroundImage: "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(124,58,237,0.4) 0%, transparent 50%)",
-          }} />
-          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: "rgba(255,255,255,0.12)",
-                border: "1px solid rgba(255,255,255,0.18)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                backdropFilter: "blur(8px)",
-              }}>
-                <span className="bb-pulse-dot-large" />
-              </div>
-              <div style={{ lineHeight: 1.15 }}>
-                <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: -0.3 }}>Pulse</div>
-                <div style={{ fontSize: 11, opacity: 0.75, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>
-                  Your AI analyst · {WEEKS[weekIdx].label}
-                </div>
-              </div>
-            </div>
-            <button onClick={onClose} data-testid="close-ask-btn" style={{
-              background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)",
-              color: "#fff", width: 30, height: 30, borderRadius: 8,
-              fontSize: 14, cursor: "pointer", padding: 0,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "background 0.15s",
-            }}
-            onMouseOver={e => e.currentTarget.style.background = "rgba(255,255,255,0.2)"}
-            onMouseOut={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
-            aria-label="Close">✕</button>
-          </div>
-        </div>
-
-        {/* Body — cream */}
-        <div ref={scrollRef} style={{
-          flex: 1, overflowY: "auto", padding: "16px 18px",
-          display: "flex", flexDirection: "column", gap: 12,
-          background: "#FAF8F4",
-        }}>
-          {messages.length === 0 && (
-            <div style={{ marginTop: 4 }}>
-              <div style={{ fontSize: 15, color: "#0F172A", lineHeight: 1.55, fontWeight: 600 }}>
-                Hey Jennifer.
-              </div>
-              <div style={{ fontSize: 13.5, color: "#475569", lineHeight: 1.6, marginTop: 6 }}>
-                I have your full agent picture loaded for{" "}
-                <strong style={{ color: "#4F46E5" }}>{WEEKS[weekIdx].label}</strong>.
-                Pick a question or type your own.
-              </div>
-              <SuggestedChips onPick={send} disabled={pending} />
-            </div>
-          )}
-          {messages.map((m) => (
-            m.role === "user"
-              ? <UserBubble key={m.id} text={m.text} />
-              : <AssistantBubble key={m.id} text={m.text} streaming={!!m.streaming} />
-          ))}
-          {error && (
-            <div data-testid="ask-error" style={{
-              fontSize: 12, color: "#991B1B", background: "#FEF2F2",
-              border: "1px solid #FECACA", padding: "8px 12px", borderRadius: 8,
-            }}>
-              {error}
-            </div>
-          )}
-        </div>
-
-        {/* Composer — pill-shaped */}
-        <div style={{
-          padding: 14,
-          background: "#FAF8F4",
-          borderTop: "1px solid rgba(99,102,241,0.12)",
-        }}>
-          <div style={{
-            display: "flex", gap: 8, alignItems: "flex-end",
-            background: "#FFFFFF",
-            border: "1px solid rgba(99,102,241,0.2)",
-            borderRadius: 16,
-            padding: 6,
-            boxShadow: "0 2px 8px rgba(15,23,42,0.04)",
-            transition: "border-color 0.15s, box-shadow 0.15s",
-          }}>
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={onKey}
-              data-testid="ask-input"
-              placeholder="Ask anything about your agents…"
-              rows={1}
-              disabled={pending}
-              style={{
-                flex: 1, resize: "none", border: "none",
-                padding: "8px 10px", fontSize: 13.5,
-                fontFamily: FONT, color: "#0F172A", outline: "none",
-                background: "transparent", lineHeight: 1.45,
-                maxHeight: 120, minHeight: 28,
-              }}
-            />
-            <button
-              onClick={() => send()}
-              disabled={pending || !input.trim()}
-              data-testid="ask-send-btn"
-              style={{
-                padding: "8px 14px", borderRadius: 12, border: "none",
-                background: (pending || !input.trim())
-                  ? "#CBD5E1"
-                  : "linear-gradient(135deg, #4F46E5, #7C3AED)",
-                color: "#fff", fontSize: 13, fontWeight: 700,
-                cursor: (pending || !input.trim()) ? "not-allowed" : "pointer",
-                fontFamily: FONT, transition: "all 0.15s",
-                display: "flex", alignItems: "center", gap: 6, minHeight: 36,
-                boxShadow: (pending || !input.trim()) ? "none" : "0 4px 12px rgba(79,70,229,0.35)",
-              }}
-            >
-              {pending ? <span className="bb-spinner" style={{ width: 12, height: 12 }} /> : "↑"}
-            </button>
-          </div>
-          <div style={{ fontSize: 10.5, color: "#64748B", marginTop: 8, paddingLeft: 4, fontWeight: 500 }}>
-            Enter to send · Shift+Enter for newline
-          </div>
-        </div>
-      </aside>
-    </>
   );
 };
 
@@ -1236,7 +1047,6 @@ export default function Blackbox() {
   const [selectedAgentId, setSelectedAgentId] = useState(null);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [weightOpen, setWeightOpen] = useState(false);
-  const [askOpen, setAskOpen] = useState(false);
 
   const nav = useCallback((to, agentId = null, issue = null) => {
     setScreen(to);
@@ -1254,21 +1064,9 @@ export default function Blackbox() {
       {/* Local styles for animations */}
       <style>{`
         @keyframes bbSlide { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes bbPopIn { from { transform: translateY(20px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
         @keyframes bbFade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes bbPulse { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
-        @keyframes bbCaret { 50% { opacity: 0; } }
         @keyframes bbSpin { to { transform: rotate(360deg); } }
-        @keyframes bbGlow {
-          0%, 100% { box-shadow: 0 4px 14px rgba(79,70,229,0.35), 0 0 0 0 rgba(124,58,237,0.55); }
-          50%      { box-shadow: 0 6px 22px rgba(79,70,229,0.55), 0 0 0 10px rgba(124,58,237,0); }
-        }
-        @keyframes bbSparkleSpin { to { transform: rotate(360deg); } }
-        @keyframes bbShine {
-          0%   { transform: translateX(-120%) skewX(-20deg); }
-          60%  { transform: translateX(220%) skewX(-20deg); }
-          100% { transform: translateX(220%) skewX(-20deg); }
-        }
         .bb-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:${COLORS.accent}; animation: bbPulse 1.1s infinite ease-in-out both; }
         .bb-spinner { display:inline-block; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation: bbSpin 0.7s linear infinite; }
 
@@ -1326,26 +1124,19 @@ export default function Blackbox() {
             gap: 6px !important;
           }
 
-          /* Pulse drawer becomes a full-screen sheet on mobile */
-          .bb-pulse-panel {
-            top: 0 !important;
-            bottom: 0 !important;
-            right: 0 !important;
-            left: 0 !important;
-            width: 100vw !important;
-            height: 100vh !important;
-            height: 100dvh !important;
-            max-width: none !important;
-            border-radius: 0 !important;
+          /* Weekly Report tables collapse on mobile */
+          .bb-kpi-grid { grid-template-columns: 1fr 1fr !important; gap: 10px !important; }
+          .bb-matrix {
+            grid-template-columns: 1.2fr repeat(4, 1fr) 1fr !important;
+            gap: 4px !important;
           }
-
-          .bb-ask-suggestions { grid-template-columns: 1fr !important; }
-
-          .bb-pulse-cta {
-            padding: 9px 16px !important;
-            font-size: 12.5px !important;
-            letter-spacing: 0.3px !important;
+          .bb-matrix > div { font-size: 10.5px !important; padding: 4px 2px !important; }
+          .bb-vol-table {
+            grid-template-columns: 1.4fr 1fr 1fr 1fr !important;
+            gap: 6px !important;
           }
+          .bb-vol-table > div:nth-of-type(5n+5) { display: none !important; } /* hide $/Resolution col on phones */
+
           .bb-brand-name { font-size: 18px !important; }
           .bb-brand-tile { width: 32px !important; height: 32px !important; }
           .bb-brand-tile span { font-size: 16px !important; }
@@ -1355,10 +1146,11 @@ export default function Blackbox() {
           .bb-content { padding: 14px 12px 32px !important; }
           .bb-overview-header h1,
           .bb-report-header h1 { font-size: 22px !important; }
-          .bb-pulse-cta {
-            padding: 8px 14px !important;
-            font-size: 12px !important;
+          .bb-matrix {
+            grid-template-columns: 1fr repeat(2, 1fr) 1fr !important;
           }
+          .bb-matrix > div:nth-of-type(7n+4),
+          .bb-matrix > div:nth-of-type(7n+5) { display: none !important; }
         }
 
         /* Tablet portrait (iPad ~820–1024px) — keep desktop layout
@@ -1368,70 +1160,6 @@ export default function Blackbox() {
           .bb-agent-card { gap: 16px !important; }
         }
 
-        /* Larger pulse dot used inside the panel header avatar */
-        .bb-pulse-dot-large {
-          position: relative;
-          display: inline-block;
-          width: 10px; height: 10px;
-          border-radius: 50%;
-          background: #34D399;
-          box-shadow: 0 0 0 3px rgba(52,211,153,0.25);
-        }
-        .bb-pulse-dot-large::before {
-          content: "";
-          position: absolute;
-          inset: -5px;
-          border-radius: 50%;
-          background: rgba(52,211,153,0.5);
-          animation: bbHeartbeat 1.4s ease-in-out infinite;
-        }
-
-        /* Pulse hero CTA — heartbeat-themed */
-        .bb-pulse-cta {
-          position: relative;
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          padding: 11px 22px 11px 18px;
-          border-radius: 999px;
-          background: linear-gradient(120deg, #0F172A 0%, #312E81 50%, #4F46E5 100%);
-          background-size: 220% 220%;
-          background-position: 0% 50%;
-          border: 1px solid rgba(255,255,255,0.15);
-          color: #fff;
-          font-size: 14px;
-          font-weight: 800;
-          letter-spacing: 0.4px;
-          text-transform: uppercase;
-          font-family: ${FONT};
-          cursor: pointer;
-          overflow: hidden;
-          transition: transform 0.18s ease, background-position 0.6s ease, box-shadow 0.2s ease;
-          box-shadow: 0 6px 20px rgba(15,23,42,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
-        }
-        .bb-pulse-cta:hover { transform: translateY(-1px) scale(1.03); background-position: 100% 50%; box-shadow: 0 10px 28px rgba(79,70,229,0.45), inset 0 1px 0 rgba(255,255,255,0.12); }
-        .bb-pulse-cta:active { transform: translateY(0) scale(0.99); }
-        .bb-pulse-cta .bb-pulse-dot {
-          position: relative;
-          display: inline-block;
-          width: 9px; height: 9px;
-          border-radius: 50%;
-          background: #34D399;
-          box-shadow: 0 0 0 3px rgba(52,211,153,0.25);
-        }
-        .bb-pulse-cta .bb-pulse-dot::before {
-          content: "";
-          position: absolute;
-          inset: -4px;
-          border-radius: 50%;
-          background: rgba(52,211,153,0.55);
-          animation: bbHeartbeat 1.4s ease-in-out infinite;
-        }
-        @keyframes bbHeartbeat {
-          0%   { transform: scale(0.8); opacity: 0.7; }
-          50%  { transform: scale(1.6); opacity: 0; }
-          100% { transform: scale(0.8); opacity: 0; }
-        }
 
         /* Hide platform-injected "Made with Emergent" badge */
         #emergent-badge,
@@ -1457,10 +1185,6 @@ export default function Blackbox() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <button onClick={() => setAskOpen(true)} data-testid="open-ask-btn" className="bb-pulse-cta">
-            <span className="bb-pulse-dot" />
-            Pulse
-          </button>
           <span className="bb-topbar-workspace" style={{ fontSize: 12, color: COLORS.textSecondary }}>Jennifer's Workspace</span>
           <div style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>J</div>
         </div>
@@ -1490,13 +1214,6 @@ export default function Blackbox() {
           <WeeklyReport weekIdx={weekIdx} weights={weights} onBack={() => nav("overview")} />
         )}
       </div>
-
-      <AskBlackboxPanel
-        open={askOpen}
-        onClose={() => setAskOpen(false)}
-        weekIdx={weekIdx}
-        weights={weights}
-      />
     </div>
   );
 }
