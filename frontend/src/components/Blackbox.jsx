@@ -4,8 +4,11 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "";
+// On Vercel (single deployment) BACKEND_URL is empty, so we hit the same
+// origin via a relative path. Locally on Emergent it's set, so we use the
+// absolute preview URL. Both flows hit the same FastAPI surface.
+const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
