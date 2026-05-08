@@ -176,7 +176,9 @@ async def _call_claude(question: str, context: str) -> str:
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=55.0) as client:
+    # connect / read split — fail fast on connect, allow Claude time to think
+    timeout = httpx.Timeout(connect=8.0, read=50.0, write=10.0, pool=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         r = await client.post(
             f"{EMERGENT_LLM_BASE_URL}/v1/chat/completions",
             json=payload,
@@ -194,7 +196,7 @@ async def _call_claude(question: str, context: str) -> str:
 @app.post("/api/ask", response_model=AskResponse)
 async def ask(payload: AskRequest):
     if not EMERGENT_LLM_KEY:
-        raise HTTPException(status_code=500, detail="LLM key not configured")
+        raise HTTPException(status_code=500, detail="LLM key not configured. Add EMERGENT_LLM_KEY to Vercel project environment variables.")
     if not payload.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
@@ -202,12 +204,29 @@ async def ask(payload: AskRequest):
 
     try:
         answer = await _call_claude(payload.question, payload.context)
+    except httpx.TimeoutException:
+        logger.exception("LLM call timed out")
+        raise HTTPException(
+            status_code=504,
+            detail="The AI service took too long to respond. On Vercel Hobby (10s function limit), upgrade to Pro for the 60s ceiling, or try a shorter question.",
+        )
     except httpx.HTTPStatusError as e:
-        logger.exception("LLM proxy returned non-2xx: status=%s body=%s", e.response.status_code, e.response.text[:500])
-        raise HTTPException(status_code=502, detail="The assistant is unavailable right now. Please try again.")
-    except (httpx.HTTPError, RuntimeError):
-        logger.exception("LLM call failed")
-        raise HTTPException(status_code=502, detail="The assistant is unavailable right now. Please try again.")
+        body = (e.response.text or "")[:300]
+        logger.exception("LLM proxy returned non-2xx: status=%s body=%s", e.response.status_code, body)
+        if e.response.status_code in (401, 403):
+            raise HTTPException(status_code=502, detail="The AI service rejected the API key. Verify EMERGENT_LLM_KEY in Vercel env vars is correct and not expired.")
+        if e.response.status_code == 429:
+            raise HTTPException(status_code=502, detail="The AI service is rate-limiting requests. Try again in a few seconds.")
+        raise HTTPException(status_code=502, detail=f"AI service returned {e.response.status_code}. Check Vercel function logs for details.")
+    except httpx.HTTPError:
+        logger.exception("LLM call network error")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not reach the AI service from Vercel. Check Vercel function logs and verify outbound network is not blocked.",
+        )
+    except RuntimeError as e:
+        logger.exception("LLM response parse error")
+        raise HTTPException(status_code=502, detail=f"AI service returned an unexpected response: {e}")
 
     answer = _sanitize(answer)
 

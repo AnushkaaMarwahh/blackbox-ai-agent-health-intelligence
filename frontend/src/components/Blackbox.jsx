@@ -624,44 +624,49 @@ const exportReportPdf = async ({ weekIdx, weights, reportEl, setStatus }) => {
       windowWidth: reportEl.scrollWidth,
     });
 
-    const imgData = canvas.toDataURL("image/png");
-
     // jsPDF page dimensions in mm at "a4"
     const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
     const pageW = pdf.internal.pageSize.getWidth();   // 210
     const pageH = pdf.internal.pageSize.getHeight();  // 297
 
-    // === Cover header (page 1) ===
-    const headerH = 32;
+    // === Compact, professional header (page 1) ===
+    // ASCII-only text. jsPDF's bundled Helvetica does NOT support Unicode
+    // glyphs like flag/heart/check. Using plain letters keeps it crisp.
+    const headerH = 22; // mm — slim band, not a billboard
     pdf.setFillColor(79, 70, 229); // indigo accent
     pdf.rect(0, 0, pageW, headerH, "F");
 
     pdf.setTextColor(255, 255, 255);
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(20);
-    pdf.text("Blackbox Weekly Report", 14, 14);
+    pdf.setFontSize(15);
+    pdf.text("BLACKBOX", 14, 10);
 
     pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
-    pdf.text(`${WEEKS[weekIdx].label}`, 14, 21);
-    pdf.text("Agent Health Intelligence", 14, 27);
-
-    // Right-aligned meta
-    const generated = new Date();
-    const stamp = generated.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
     pdf.setFontSize(9);
-    pdf.text(`Generated ${stamp}`, pageW - 14, 21, { align: "right" });
-    pdf.text(`Weights C/S/$/⚑: ${weights.completion}/${weights.satisfaction}/${weights.cost}/${weights.compliance}`, pageW - 14, 27, { align: "right" });
+    pdf.text("Agent Health Intelligence", 14, 15);
+
+    // Right-aligned meta (also ASCII-only, no unicode flags)
+    pdf.setFontSize(11);
+    pdf.setFont("helvetica", "bold");
+    pdf.text(`Weekly Report  ${WEEKS[weekIdx].label}`, pageW - 14, 10, { align: "right" });
+
+    pdf.setFontSize(8);
+    pdf.setFont("helvetica", "normal");
+    const w = weights;
+    pdf.text(
+      `Weights  Comp ${w.completion}  Sat ${w.satisfaction}  Cost ${w.cost}  Policy ${w.compliance}`,
+      pageW - 14, 15, { align: "right" }
+    );
 
     // === Capture report image, fit to page ===
-    const margin = 10;
+    const margin = 12;
     const usableW = pageW - margin * 2;
 
     // Pixels-per-mm of the source canvas
     const mmPerPxX = usableW / canvas.width;
     const fullImgHmm = canvas.height * mmPerPxX;
 
-    let position = headerH + 8; // leave space below header on first page
+    let position = headerH + 8; // leave breathing room below header on page 1
     let remaining = fullImgHmm;
     let yOffsetPx = 0;
 
@@ -673,18 +678,20 @@ const exportReportPdf = async ({ weekIdx, weights, reportEl, setStatus }) => {
       sliceCanvas.height = sliceHpx;
       const ctx = sliceCanvas.getContext("2d");
       ctx.drawImage(canvas, 0, yOffsetPx, canvas.width, sliceHpx, 0, 0, canvas.width, sliceHpx);
-      const sliceData = sliceCanvas.toDataURL("image/png");
-      pdf.addImage(sliceData, "PNG", margin, yPosMm, usableW, sliceHpx * mmPerPxX);
+      // JPEG with reasonable quality keeps file size sensible
+      const sliceData = sliceCanvas.toDataURL("image/jpeg", 0.92);
+      pdf.addImage(sliceData, "JPEG", margin, yPosMm, usableW, sliceHpx * mmPerPxX);
       yOffsetPx += sliceHpx;
     };
 
     // First page
-    const firstPageAvail = pageH - position - 12; // bottom margin reserved for footer
+    const footerReserve = 12;
+    const firstPageAvail = pageH - position - footerReserve;
     const firstSliceH = Math.min(remaining, firstPageAvail);
     renderSlice(firstSliceH, position);
     remaining -= firstSliceH;
 
-    // Footer on first page
+    // Footer (ASCII-only, no em dashes)
     const drawFooter = (pageNum, totalPages) => {
       pdf.setDrawColor(229, 231, 235);
       pdf.setLineWidth(0.2);
@@ -692,15 +699,15 @@ const exportReportPdf = async ({ weekIdx, weights, reportEl, setStatus }) => {
       pdf.setTextColor(156, 163, 175);
       pdf.setFontSize(8);
       pdf.setFont("helvetica", "normal");
-      pdf.text("Blackbox · Confidential — internal use only", margin, pageH - 5);
+      pdf.text("Blackbox  ·  Confidential, internal use only", margin, pageH - 5);
       pdf.text(`Page ${pageNum} of ${totalPages}`, pageW - margin, pageH - 5, { align: "right" });
     };
 
     // Subsequent pages
     while (remaining > 0.5) {
       pdf.addPage();
-      const topMargin = 12;
-      const avail = pageH - topMargin - 12;
+      const topMargin = 14;
+      const avail = pageH - topMargin - footerReserve;
       const sliceH = Math.min(remaining, avail);
       renderSlice(sliceH, topMargin);
       remaining -= sliceH;
