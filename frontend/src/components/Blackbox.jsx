@@ -391,7 +391,7 @@ const WeightPanel = ({ weights, onChange, onReset, isOpen, onToggle }) => {
 const WeekSelector = ({ current, onChange }) => (
   <div style={{ display: "flex", gap: 6, marginBottom: 24 }}>
     {WEEKS.map((w, i) => (
-      <button key={i} data-testid={`week-${i}`} onClick={() => onChange(i)} style={{
+      <button key={w.label} data-testid={`week-${i}`} onClick={() => onChange(i)} style={{
         padding: "8px 16px", borderRadius: 8, border: `1px solid ${i === current ? COLORS.accent : COLORS.border}`,
         background: i === current ? COLORS.accent : COLORS.surface, color: i === current ? "#fff" : COLORS.textSecondary,
         fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FONT, transition: "all 0.2s",
@@ -441,8 +441,8 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
           { label: "Overall Health", value: overall, extra: <TrendArrow current={overall} previous={prevOverall} />, color: scoreColor(overall) },
           { label: "Total Conversations", value: totalConv.toLocaleString(), color: COLORS.accent },
           { label: "Open Issues", value: issueCount, color: issueCount > 2 ? COLORS.bad : COLORS.warn },
-        ].map((c, i) => (
-          <Card key={i} style={{ padding: 20 }}>
+        ].map((c) => (
+          <Card key={c.label} style={{ padding: 20 }}>
             <div style={{ fontSize: 11, color: COLORS.textTertiary, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 700 }}>{c.label}</div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ fontSize: 32, fontWeight: 800, color: c.color, fontFamily: MONO, transition: "color 0.3s", letterSpacing: -0.5 }}>{c.value}</span>
@@ -580,8 +580,8 @@ const IssueDrilldown = ({ issue, agentName, onBack }) => {
           { label: "Metric affected", value: issue.metric },
           { label: "Impact", value: issue.impact },
           { label: "Conversations affected", value: issue.affected.toString() },
-        ].map((c, i) => (
-          <Card key={i} style={{ padding: 16 }}>
+        ].map((c) => (
+          <Card key={c.label} style={{ padding: 16 }}>
             <div style={{ fontSize: 11, color: COLORS.textTertiary, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 600 }}>{c.label}</div>
             <div style={{ fontSize: 18, fontWeight: 700, color: COLORS.text, fontFamily: MONO }}>{c.value}</div>
           </Card>
@@ -833,12 +833,12 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
         <Card style={{ marginBottom: 16 }}>
           <h3 style={{ fontSize: 12, color: COLORS.textTertiary, margin: "0 0 14px", textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Key Changes This Week</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {agents.map((a, i) => {
+            {agents.map((a) => {
               const diff = a.score - a.prevScore;
               const icon = diff > 0 ? "↗" : diff < -3 ? "⚠" : "→";
               const color = diff > 0 ? COLORS.good : diff < -3 ? COLORS.bad : COLORS.textSecondary;
               return (
-                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <div key={a.name} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                   <span style={{ fontSize: 16, color, lineHeight: 1.4, flexShrink: 0 }}>{icon}</span>
                   <p style={{ fontSize: 14, lineHeight: 1.6, color: COLORS.text, margin: 0 }}>
                     <strong>{a.name}</strong> {diff > 0 ? `improved to ${a.score} (+${diff})` : diff < 0 ? `dropped to ${a.score} (${diff})` : `stable at ${a.score}`}.
@@ -857,7 +857,7 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
               {priorities.map((p, i) => {
                 const sv = sevStyle(p.severity);
                 return (
-                  <div key={i} style={{ display: "grid", gridTemplateColumns: "72px 1fr", alignItems: "start", gap: 12, padding: "10px 0", borderBottom: i < priorities.length - 1 ? `1px solid ${COLORS.accentMid}` : "none" }}>
+                  <div key={p.id} style={{ display: "grid", gridTemplateColumns: "72px 1fr", alignItems: "start", gap: 12, padding: "10px 0", borderBottom: i < priorities.length - 1 ? `1px solid ${COLORS.accentMid}` : "none" }}>
                     <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, textAlign: "center", fontWeight: 600, background: sv.bg, color: sv.color, border: `1px solid ${sv.border}` }}>
                       {p.severity.charAt(0).toUpperCase() + p.severity.slice(1)}
                     </span>
@@ -934,7 +934,7 @@ const SuggestedChips = ({ onPick, disabled }) => {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
       {suggestions.map((s, i) => (
-        <button key={i} disabled={disabled} onClick={() => onPick(queries[i])} data-testid={`ask-suggestion-${i}`} style={{
+        <button key={s.label} disabled={disabled} onClick={() => onPick(queries[i])} data-testid={`ask-suggestion-${i}`} style={{
           fontSize: 12, padding: "10px 12px", borderRadius: 10,
           background: "rgba(255,255,255,0.65)", color: "#1E1B4B",
           border: "1px solid rgba(99,102,241,0.25)",
@@ -1026,7 +1026,13 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
     const q = (rawQ ?? input).trim();
     if (!q || pending) return;
     setError(null);
-    setMessages(m => [...m, { role: "user", text: q }, { role: "assistant", text: "", streaming: true }]);
+    const userId = `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const placeholderId = `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setMessages(m => [
+      ...m,
+      { id: userId, role: "user", text: q },
+      { id: placeholderId, role: "assistant", text: "", streaming: true },
+    ]);
     setInput("");
     setPending(true);
     try {
@@ -1035,23 +1041,15 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
         question: q, context: ctx, session_id: sessionId,
       }, { timeout: 60000 });
       setSessionId(res.data.session_id);
-      setMessages(m => {
-        const next = [...m];
-        const lastIdx = next.findLastIndex(x => x.role === "assistant");
-        if (lastIdx >= 0) {
-          next[lastIdx] = { role: "assistant", text: sanitizeAnswer(res.data.answer), streaming: false };
-        }
-        return next;
-      });
+      setMessages(m => m.map(msg =>
+        msg.id === placeholderId
+          ? { ...msg, text: sanitizeAnswer(res.data.answer), streaming: false }
+          : msg
+      ));
     } catch (e) {
       const msg = e.response?.data?.detail || e.message || "Something went wrong.";
       setError(msg);
-      setMessages(m => {
-        const next = [...m];
-        const lastIdx = next.findLastIndex(x => x.role === "assistant");
-        if (lastIdx >= 0) next.splice(lastIdx, 1);
-        return next;
-      });
+      setMessages(m => m.filter(x => x.id !== placeholderId));
     } finally {
       setPending(false);
     }
@@ -1146,10 +1144,10 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
               <SuggestedChips onPick={send} disabled={pending} />
             </div>
           )}
-          {messages.map((m, i) => (
+          {messages.map((m) => (
             m.role === "user"
-              ? <UserBubble key={i} text={m.text} />
-              : <AssistantBubble key={i} text={m.text} streaming={!!m.streaming} />
+              ? <UserBubble key={m.id} text={m.text} />
+              : <AssistantBubble key={m.id} text={m.text} streaming={!!m.streaming} />
           ))}
           {error && (
             <div data-testid="ask-error" style={{
