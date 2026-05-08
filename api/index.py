@@ -1,19 +1,20 @@
 """
 Vercel Serverless entrypoint for Blackbox.
 
-Vercel routes every `/api/*` request to this single Python function (see
-vercel.json rewrites). We expose a FastAPI ASGI `app` which Vercel's Python
-runtime can serve directly.
+This module deliberately uses *only* httpx + FastAPI to keep the function
+bundle well under Vercel's 250 MB limit. We talk to the Emergent LLM proxy
+directly (OpenAI-compatible /v1/chat/completions endpoint) using the
+EMERGENT_LLM_KEY. No litellm, no provider SDKs, no emergentintegrations.
 
-Same business logic as /app/backend/server.py — kept in sync deliberately so
-local Emergent preview and Vercel production behave identically.
+Bundle size with this implementation: ~25 MB unzipped.
+(Compare to the previous emergentintegrations build: ~415 MB.)
 
 Environment variables (set in Vercel project settings):
-  - EMERGENT_LLM_KEY   (required)  Universal key for Claude Sonnet 4.5
-  - MONGO_URL          (optional)  e.g. MongoDB Atlas SRV string. If unset,
-                                   ask logs are simply skipped.
-  - DB_NAME            (optional)  Defaults to "blackbox"
-  - CORS_ORIGINS       (optional)  Comma-separated. Defaults to "*".
+  - EMERGENT_LLM_KEY       (required)  Universal key for Claude Sonnet 4.5
+  - EMERGENT_LLM_BASE_URL  (optional)  Override proxy URL. Default works for prod.
+  - MONGO_URL              (optional)  Atlas SRV string. If unset, ask logs are skipped.
+  - DB_NAME                (optional)  Defaults to "blackbox".
+  - CORS_ORIGINS           (optional)  Comma-separated. Defaults to "*".
 """
 from __future__ import annotations
 
@@ -24,17 +25,21 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
 
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY")
+EMERGENT_LLM_BASE_URL = os.environ.get(
+    "EMERGENT_LLM_BASE_URL",
+    "https://integrations.emergentagent.com/llm",
+)
+MODEL = "claude-sonnet-4-5-20250929"
 MONGO_URL = os.environ.get("MONGO_URL")
 DB_NAME = os.environ.get("DB_NAME", "blackbox")
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
@@ -42,8 +47,7 @@ CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 logger = logging.getLogger("blackbox.api")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-# Lazy Mongo: only connect if MONGO_URL is configured. Pymongo (sync) is
-# lighter than motor and friendlier for short-lived serverless functions.
+# Lazy Mongo: only connect if MONGO_URL is configured
 _mongo_client = None
 def _get_db():
     global _mongo_client
@@ -51,10 +55,10 @@ def _get_db():
         return None
     if _mongo_client is None:
         try:
-            from pymongo import MongoClient  # imported lazily to keep cold start small
+            from pymongo import MongoClient
             _mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=2000)
         except Exception:
-            logger.exception("Mongo init failed; persistence disabled for this invocation")
+            logger.exception("Mongo init failed; persistence disabled")
             return None
     try:
         return _mongo_client[DB_NAME]
@@ -100,20 +104,8 @@ class AskResponse(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# App
+# Sanitizer
 # ─────────────────────────────────────────────────────────────────────────────
-
-# IMPORTANT: this app is mounted at the project root on Vercel. The vercel.json
-# rewrites send `/api/<path>` to this single function, so route prefix is "/api".
-app = FastAPI(title="Blackbox API (Vercel)")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 _DASH_RE = re.compile(r",\s*,")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -139,6 +131,20 @@ def _sanitize(answer: str) -> str:
     return _DASH_RE.sub(",", answer).strip()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# App
+# ─────────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="Blackbox API (Vercel)")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 @app.get("/api/")
 async def root():
     return {"message": "Blackbox API live", "runtime": "vercel"}
@@ -150,7 +156,39 @@ async def health():
         "ok": True,
         "llm_key_configured": bool(EMERGENT_LLM_KEY),
         "mongo_configured": bool(MONGO_URL),
+        "model": MODEL,
     }
+
+
+async def _call_claude(question: str, context: str) -> str:
+    """Direct call to the Emergent LLM proxy (OpenAI-compatible)."""
+    user_text = f"AGENT DATA (current view):\n{context}\n\nQUESTION:\n{question}"
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_MESSAGE},
+            {"role": "user", "content": user_text},
+        ],
+        "max_tokens": 1024,
+    }
+    headers = {
+        "Authorization": f"Bearer {EMERGENT_LLM_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=55.0) as client:
+        r = await client.post(
+            f"{EMERGENT_LLM_BASE_URL}/v1/chat/completions",
+            json=payload,
+            headers=headers,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+    try:
+        return data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(f"Unexpected LLM response shape: {e}") from e
 
 
 @app.post("/api/ask", response_model=AskResponse)
@@ -162,23 +200,17 @@ async def ask(payload: AskRequest):
 
     session_id = payload.session_id or str(uuid.uuid4())
 
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=session_id,
-        system_message=SYSTEM_MESSAGE,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-    user_text = f"AGENT DATA (current view):\n{payload.context}\n\nQUESTION:\n{payload.question}"
-
     try:
-        answer = await chat.send_message(UserMessage(text=user_text))
-    except Exception:
-        logger.exception("Claude call failed")
+        answer = await _call_claude(payload.question, payload.context)
+    except httpx.HTTPStatusError as e:
+        logger.exception("LLM proxy returned non-2xx: status=%s body=%s", e.response.status_code, e.response.text[:500])
+        raise HTTPException(status_code=502, detail="The assistant is unavailable right now. Please try again.")
+    except (httpx.HTTPError, RuntimeError):
+        logger.exception("LLM call failed")
         raise HTTPException(status_code=502, detail="The assistant is unavailable right now. Please try again.")
 
     answer = _sanitize(answer)
 
-    # Optional persistence — only if MONGO_URL is set
     db = _get_db()
     if db is not None:
         try:
@@ -190,7 +222,6 @@ async def ask(payload: AskRequest):
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
         except Exception:
-            # Persistence is best-effort. Never break the user response.
             logger.warning("Mongo insert failed", exc_info=True)
 
     return AskResponse(answer=answer, session_id=session_id)
