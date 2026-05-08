@@ -362,7 +362,7 @@ const WeightPanel = ({ weights, onChange, onReset, isOpen, onToggle }) => {
               </button>
             )}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 32px" }}>
+          <div className="bb-weight-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 32px" }}>
             {dims.map(d => {
               const pct = Math.round((weights[d.key] / Math.max(Object.values(weights).reduce((a,b)=>a+b,0), 1)) * 100);
               return (
@@ -389,7 +389,7 @@ const WeightPanel = ({ weights, onChange, onReset, isOpen, onToggle }) => {
 // ═══════════════════════════════════════════════════════════════
 
 const WeekSelector = ({ current, onChange }) => (
-  <div style={{ display: "flex", gap: 6, marginBottom: 24 }}>
+  <div className="bb-week-selector" style={{ display: "flex", gap: 6, marginBottom: 24 }}>
     {WEEKS.map((w, i) => (
       <button key={w.label} data-testid={`week-${i}`} onClick={() => onChange(i)} style={{
         padding: "8px 16px", borderRadius: 8, border: `1px solid ${i === current ? COLORS.accent : COLORS.border}`,
@@ -422,7 +422,7 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
 
   return (
     <div data-testid="overview-screen">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+      <div className="bb-overview-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: COLORS.text, margin: 0, fontFamily: FONT, letterSpacing: -0.6 }}>Agent Overview</h1>
           <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 600, letterSpacing: 0.3, textTransform: "uppercase" }}>{WEEKS[weekIdx].label}</p>
@@ -436,7 +436,7 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
 
       {weightPanel}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 28 }}>
+      <div className="bb-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 28 }}>
         {[
           { label: "Overall Health", value: overall, extra: <TrendArrow current={overall} previous={prevOverall} />, color: scoreColor(overall) },
           { label: "Total Conversations", value: totalConv.toLocaleString(), color: COLORS.accent },
@@ -454,7 +454,7 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {agents.map(a => (
-          <Card key={a.id} hoverable onClick={() => onAgent(a)} data-testid={`agent-card-${a.id}`} style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "64px 1fr 180px 100px", alignItems: "center", gap: 24 }}>
+          <Card key={a.id} hoverable onClick={() => onAgent(a)} data-testid={`agent-card-${a.id}`} className="bb-agent-card" style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "64px 1fr 180px 100px", alignItems: "center", gap: 24 }}>
             <ScoreRing score={a.score} size={56} strokeWidth={5} />
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 3 }}>
@@ -463,14 +463,14 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
               </div>
               <span style={{ fontSize: 13, color: COLORS.textSecondary, fontWeight: 500 }}>{generateStatusLine(a.name, a.score, a.prevScore, a.weekData.issues)}</span>
             </div>
-            <div style={{ height: 36 }}>
+            <div className="bb-agent-trend" style={{ height: 36 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={a.trend.slice(-6)}>
                   <Area type="monotone" dataKey="score" stroke={scoreColor(a.score)} fill={scoreColor(a.score)} fillOpacity={0.08} strokeWidth={2} dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
-            <div style={{ textAlign: "right" }}>
+            <div className="bb-agent-arrow" style={{ textAlign: "right" }}>
               <TrendArrow current={a.score} previous={a.prevScore} />
               <div style={{ fontSize: 11, color: COLORS.textTertiary, marginTop: 2 }}>vs last week</div>
             </div>
@@ -513,7 +513,7 @@ const AgentDetail = ({ agentMeta, weekIdx, weights, onBack, onIssue }) => {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 20, marginBottom: 32 }}>
+      <div className="bb-detail-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 20, marginBottom: 32 }}>
         <Card>
           <h3 style={{ fontSize: 12, color: COLORS.textTertiary, margin: "0 0 20px", textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Health Dimensions</h3>
           <DimensionBar label="Task Completion" score={dims.completion} icon="✓" />
@@ -543,7 +543,7 @@ const AgentDetail = ({ agentMeta, weekIdx, weights, onBack, onIssue }) => {
         {wd.issues.map(issue => {
           const sv = sevStyle(issue.severity);
           return (
-            <div key={issue.id} data-testid={`issue-${issue.id}`} onClick={() => onIssue(issue)}
+            <div key={issue.id} data-testid={`issue-${issue.id}`} onClick={() => onIssue(issue)} className="bb-issue-row"
               style={{ background: sv.bg, border: `1px solid ${sv.border}`, borderRadius: 12, padding: "14px 20px", cursor: "pointer", transition: "all 0.2s", display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 16 }}
               onMouseOver={e => e.currentTarget.style.transform = "translateX(4px)"} onMouseOut={e => e.currentTarget.style.transform = "translateX(0)"}>
               <div>
@@ -575,7 +575,7 @@ const IssueDrilldown = ({ issue, agentName, onBack }) => {
       </div>
       <h1 style={{ fontSize: 21, fontWeight: 700, color: COLORS.text, margin: "0 0 28px", fontFamily: FONT }}>{issue.title}</h1>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 28 }}>
+      <div className="bb-issue-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 28 }}>
         {[
           { label: "Metric affected", value: issue.metric },
           { label: "Impact", value: issue.impact },
@@ -783,7 +783,7 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
   return (
     <div data-testid="weekly-report-screen">
       <BackBtn onClick={onBack} label="Back to Overview" />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
+      <div className="bb-report-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: COLORS.text, margin: 0, fontFamily: FONT }}>Weekly Report</h1>
           <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 600, letterSpacing: 0.3, textTransform: "uppercase" }}>{WEEKS[weekIdx].label}</p>
@@ -817,7 +817,7 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
 
       {/* Capture region for PDF */}
       <div ref={reportRef} data-testid="report-capture-region" style={{ background: "transparent" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 16 }}>
+        <div className="bb-report-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 16 }}>
           {agents.map(a => (
             <Card key={a.name} style={{ padding: 20 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
@@ -1079,7 +1079,7 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
         zIndex: 200, animation: "bbFade 0.18s ease",
       }} />
       {/* Floating bottom-right card */}
-      <aside data-testid="ask-blackbox-panel" style={{
+      <aside data-testid="ask-blackbox-panel" className="bb-pulse-panel" style={{
         position: "fixed", bottom: 24, right: 24,
         width: "min(460px, calc(100vw - 32px))",
         height: "min(640px, calc(100vh - 48px))",
@@ -1272,6 +1272,102 @@ export default function Blackbox() {
         .bb-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:${COLORS.accent}; animation: bbPulse 1.1s infinite ease-in-out both; }
         .bb-spinner { display:inline-block; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation: bbSpin 0.7s linear infinite; }
 
+        /* =============================================================
+           Responsive layout — phones, tablets, desktops
+           Inline styles set the desktop default; these media queries
+           override only on smaller viewports.
+           ============================================================= */
+        @media (max-width: 820px) {
+          .bb-content { padding: 18px 14px 40px !important; }
+          .bb-topbar { padding: 12px 16px !important; }
+          .bb-topbar-tagline { display: none !important; }
+          .bb-topbar-workspace { display: none !important; }
+
+          .bb-stats-grid,
+          .bb-issue-grid,
+          .bb-report-grid { grid-template-columns: 1fr !important; }
+          .bb-weight-grid { grid-template-columns: 1fr !important; gap: 14px !important; }
+
+          .bb-detail-grid { grid-template-columns: 1fr !important; }
+
+          .bb-agent-card {
+            grid-template-columns: 56px 1fr !important;
+            gap: 14px !important;
+            padding: 16px !important;
+          }
+          .bb-agent-card .bb-agent-trend,
+          .bb-agent-card .bb-agent-arrow { display: none !important; }
+
+          .bb-overview-header,
+          .bb-report-header {
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 14px !important;
+          }
+          .bb-overview-header h1,
+          .bb-report-header h1 { font-size: 24px !important; }
+
+          .bb-week-selector { flex-wrap: wrap !important; }
+          .bb-week-selector button {
+            flex: 1 1 calc(50% - 6px) !important;
+            min-width: 0 !important;
+            padding: 9px 8px !important;
+            font-size: 12px !important;
+          }
+
+          .bb-issue-row {
+            grid-template-columns: 1fr !important;
+            gap: 8px !important;
+            padding: 12px 14px !important;
+          }
+
+          .bb-priority-row {
+            grid-template-columns: 1fr !important;
+            gap: 6px !important;
+          }
+
+          /* Pulse drawer becomes a full-screen sheet on mobile */
+          .bb-pulse-panel {
+            top: 0 !important;
+            bottom: 0 !important;
+            right: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            height: 100dvh !important;
+            max-width: none !important;
+            border-radius: 0 !important;
+          }
+
+          .bb-ask-suggestions { grid-template-columns: 1fr !important; }
+
+          .bb-pulse-cta {
+            padding: 9px 16px !important;
+            font-size: 12.5px !important;
+            letter-spacing: 0.3px !important;
+          }
+          .bb-brand-name { font-size: 18px !important; }
+          .bb-brand-tile { width: 32px !important; height: 32px !important; }
+          .bb-brand-tile span { font-size: 16px !important; }
+        }
+
+        @media (max-width: 480px) {
+          .bb-content { padding: 14px 12px 32px !important; }
+          .bb-overview-header h1,
+          .bb-report-header h1 { font-size: 22px !important; }
+          .bb-pulse-cta {
+            padding: 8px 14px !important;
+            font-size: 12px !important;
+          }
+        }
+
+        /* Tablet portrait (iPad ~820–1024px) — keep desktop layout
+           but tighten the agent card right rail so trend chart shows */
+        @media (min-width: 821px) and (max-width: 1024px) {
+          .bb-content { padding: 24px 20px 50px !important; }
+          .bb-agent-card { gap: 16px !important; }
+        }
+
         /* Larger pulse dot used inside the panel header avatar */
         .bb-pulse-dot-large {
           position: relative;
@@ -1352,12 +1448,12 @@ export default function Blackbox() {
         position: "sticky", top: 0, zIndex: 100,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => nav("overview")} data-testid="logo-home">
-          <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 12px rgba(79,70,229,0.35)" }}>
+          <div className="bb-brand-tile" style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 12px rgba(79,70,229,0.35)" }}>
             <span style={{ fontSize: 19, fontWeight: 900, color: "#fff", letterSpacing: -0.5 }}>B</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
-            <span style={{ fontSize: 22, fontWeight: 900, color: COLORS.text, letterSpacing: -0.8 }}>Blackbox</span>
-            <span style={{ fontSize: 11.5, color: COLORS.textSecondary, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>Agent Health Intelligence</span>
+            <span className="bb-brand-name" style={{ fontSize: 22, fontWeight: 900, color: COLORS.text, letterSpacing: -0.8 }}>Blackbox</span>
+            <span className="bb-topbar-tagline" style={{ fontSize: 11.5, color: COLORS.textSecondary, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>Agent Health Intelligence</span>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1365,13 +1461,13 @@ export default function Blackbox() {
             <span className="bb-pulse-dot" />
             Pulse
           </button>
-          <span style={{ fontSize: 12, color: COLORS.textSecondary }}>Jennifer's Workspace</span>
+          <span className="bb-topbar-workspace" style={{ fontSize: 12, color: COLORS.textSecondary }}>Jennifer's Workspace</span>
           <div style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>J</div>
         </div>
       </div>
 
       {/* Content */}
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: "28px 24px 60px" }}>
+      <div className="bb-content" style={{ maxWidth: 960, margin: "0 auto", padding: "28px 24px 60px" }}>
         {screen === "overview" && (
           <AgentOverview weekIdx={weekIdx} weights={weights}
             onAgent={(a) => nav("detail", a.id)} onReport={onReportNav}
