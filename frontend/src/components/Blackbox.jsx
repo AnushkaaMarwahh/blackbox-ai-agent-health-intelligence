@@ -19,10 +19,10 @@ const TREND_LABELS = [
 ];
 
 const WEEKS = [
-  { label: "Apr 7 – 13", endIdx: 7 },
-  { label: "Apr 14 – 20", endIdx: 8 },
-  { label: "Apr 21 – 27", endIdx: 9 },
-  { label: "Apr 28 – May 4", endIdx: 10 },
+  { label: "Week 1", endIdx: 7 },
+  { label: "Week 2", endIdx: 8 },
+  { label: "Week 3", endIdx: 9 },
+  { label: "Week 4", endIdx: 10 },
 ];
 
 const COLORS = {
@@ -205,11 +205,11 @@ const generateStatusLine = (name, score, prevScore, issues) => {
   return issues.length > 0 ? issues[0].title : `Down ${Math.abs(diff)} points from last week.`;
 };
 
-// Build the textual context that we send to Claude for "Ask Blackbox"
+// Build the textual context that we send to Claude for "Pulse"
 const buildAskContext = (weekIdx, weights) => {
   const week = WEEKS[weekIdx];
   const lines = [];
-  lines.push(`Reporting Week: ${week.label}, 2026`);
+  lines.push(`Reporting Period: ${week.label} (current week)`);
   lines.push(`Health Score Weights: completion=${weights.completion}, satisfaction=${weights.satisfaction}, cost=${weights.cost}, compliance=${weights.compliance}`);
   lines.push("");
 
@@ -425,7 +425,7 @@ const AgentOverview = ({ weekIdx, weights, onAgent, onReport, weightPanel }) => 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
           <h1 style={{ fontSize: 30, fontWeight: 800, color: COLORS.text, margin: 0, fontFamily: FONT, letterSpacing: -0.6 }}>Agent Overview</h1>
-          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 500 }}>{WEEKS[weekIdx].label}, 2026</p>
+          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 600, letterSpacing: 0.3, textTransform: "uppercase" }}>{WEEKS[weekIdx].label}</p>
         </div>
         <button onClick={onReport} data-testid="view-weekly-report-btn" style={{ padding: "11px 22px", background: COLORS.accent, border: "none", borderRadius: 12, color: "#fff", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: FONT, boxShadow: "0 6px 18px rgba(79,70,229,0.35)", transition: "transform 0.15s, box-shadow 0.15s", letterSpacing: 0.2 }}
           onMouseOver={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 10px 24px rgba(79,70,229,0.45)"; }}
@@ -643,7 +643,7 @@ const exportReportPdf = async ({ weekIdx, weights, reportEl, setStatus }) => {
 
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(10);
-    pdf.text(`${WEEKS[weekIdx].label}, 2026`, 14, 21);
+    pdf.text(`${WEEKS[weekIdx].label}`, 14, 21);
     pdf.text("Agent Health Intelligence", 14, 27);
 
     // Right-aligned meta
@@ -712,7 +712,7 @@ const exportReportPdf = async ({ weekIdx, weights, reportEl, setStatus }) => {
       drawFooter(p, totalPages);
     }
 
-    const fname = `Blackbox_Weekly_${WEEKS[weekIdx].label.replace(/\s+/g, "_").replace(/[–—]/g, "-")}_2026.pdf`;
+    const fname = `Blackbox_Weekly_${WEEKS[weekIdx].label.replace(/\s+/g, "_")}.pdf`;
     pdf.save(fname);
     setStatus("done");
     setTimeout(() => setStatus("idle"), 1800);
@@ -752,7 +752,7 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
   const copyText = useCallback(() => {
     const diff = overall - prevOverall;
     const arrow = diff > 0 ? `↑+${diff}` : diff < 0 ? `↓${diff}` : "→0";
-    let txt = `Blackbox Weekly Report — ${WEEKS[weekIdx].label}, 2026\nOverall Health: ${overall} (${arrow})\n\n`;
+    let txt = `Blackbox Weekly Report — ${WEEKS[weekIdx].label}\nOverall Health: ${overall} (${arrow})\n\n`;
     agents.forEach(a => {
       const d = a.score - a.prevScore;
       const ar = d > 0 ? `↑+${d}` : d < 0 ? `↓${d}` : "→0";
@@ -779,7 +779,7 @@ const WeeklyReport = ({ weekIdx, weights, onBack }) => {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: COLORS.text, margin: 0, fontFamily: FONT }}>Weekly Report</h1>
-          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0" }}>{WEEKS[weekIdx].label}, 2026</p>
+          <p style={{ fontSize: 13, color: COLORS.textTertiary, margin: "4px 0 0", fontWeight: 600, letterSpacing: 0.3, textTransform: "uppercase" }}>{WEEKS[weekIdx].label}</p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ textAlign: "right" }}>
@@ -920,23 +920,35 @@ const useTypewriter = (fullText, speedMs = 12) => {
 
 const SuggestedChips = ({ onPick, disabled }) => {
   const suggestions = [
+    { label: "Who needs my attention?", icon: "▲" },
+    { label: "Why is the cost up?", icon: "$" },
+    { label: "Top 3 priorities", icon: "★" },
+    { label: "Trend snapshot", icon: "≋" },
+  ];
+  const queries = [
     "Which agent needs my attention this week?",
-    "What's driving the cost spike on the Support Bot?",
-    "Summarize the top 3 priorities for Monday's standup.",
-    "How is the Lead Qualifier trending vs last month?",
+    "What is driving the cost spike on the Support Bot?",
+    "Summarize the top 3 priorities for the next standup.",
+    "Give me a trend snapshot across all agents.",
   ];
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 14 }}>
       {suggestions.map((s, i) => (
-        <button key={i} disabled={disabled} onClick={() => onPick(s)} data-testid={`ask-suggestion-${i}`} style={{
-          fontSize: 11, padding: "6px 10px", borderRadius: 999,
-          background: COLORS.accentLight, color: COLORS.accentDark,
-          border: `1px solid ${COLORS.accentMid}`, cursor: disabled ? "not-allowed" : "pointer",
-          fontFamily: FONT, fontWeight: 500, opacity: disabled ? 0.5 : 1, transition: "all 0.15s",
+        <button key={i} disabled={disabled} onClick={() => onPick(queries[i])} data-testid={`ask-suggestion-${i}`} style={{
+          fontSize: 12, padding: "10px 12px", borderRadius: 10,
+          background: "rgba(255,255,255,0.65)", color: "#1E1B4B",
+          border: "1px solid rgba(99,102,241,0.25)",
+          backdropFilter: "blur(6px)",
+          cursor: disabled ? "not-allowed" : "pointer",
+          fontFamily: FONT, fontWeight: 600,
+          opacity: disabled ? 0.5 : 1, transition: "all 0.18s",
+          textAlign: "left", display: "flex", alignItems: "center", gap: 8,
+          boxShadow: "0 1px 0 rgba(255,255,255,0.7) inset, 0 1px 2px rgba(15,23,42,0.04)",
         }}
-        onMouseOver={e => !disabled && (e.currentTarget.style.background = COLORS.accentMid)}
-        onMouseOut={e => !disabled && (e.currentTarget.style.background = COLORS.accentLight)}>
-          {s}
+        onMouseOver={e => !disabled && (e.currentTarget.style.transform = "translateY(-1px)", e.currentTarget.style.borderColor = "rgba(99,102,241,0.55)", e.currentTarget.style.background = "rgba(255,255,255,0.95)")}
+        onMouseOut={e => !disabled && (e.currentTarget.style.transform = "translateY(0)", e.currentTarget.style.borderColor = "rgba(99,102,241,0.25)", e.currentTarget.style.background = "rgba(255,255,255,0.65)")}>
+          <span style={{ color: "#7C3AED", fontWeight: 800 }}>{s.icon}</span>
+          {s.label}
         </button>
       ))}
     </div>
@@ -954,32 +966,45 @@ const TypingDots = () => (
 const AssistantBubble = ({ text, streaming }) => {
   const { shown, done } = useTypewriter(streaming ? "" : text, 10);
   return (
-    <div data-testid="assistant-message" style={{
-      background: COLORS.accentLight, border: `1px solid ${COLORS.accentMid}`,
-      borderRadius: 12, padding: "12px 14px", color: COLORS.accentDark,
-      fontSize: 13.5, lineHeight: 1.65, whiteSpace: "pre-wrap", maxWidth: "92%", alignSelf: "flex-start",
-    }}>
-      {streaming ? (
-        <TypingDots />
-      ) : (
-        <>
-          {shown}
-          {!done && <span style={{
-            display: "inline-block", width: 7, height: 14, marginLeft: 2,
-            background: COLORS.accent, verticalAlign: "text-bottom",
-            animation: "bbCaret 0.9s steps(2) infinite",
-          }} />}
-        </>
-      )}
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", maxWidth: "92%", alignSelf: "flex-start" }}>
+      <div style={{
+        width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+        background: "linear-gradient(135deg, #4F46E5, #7C3AED)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: "#fff", fontSize: 13, fontWeight: 800,
+        boxShadow: "0 2px 8px rgba(79,70,229,0.35)",
+      }}>P</div>
+      <div data-testid="assistant-message" style={{
+        background: "#FFFFFF", border: "1px solid rgba(99,102,241,0.18)",
+        borderRadius: "4px 14px 14px 14px", padding: "11px 14px",
+        color: "#1E293B", fontSize: 13.5, lineHeight: 1.65,
+        whiteSpace: "pre-wrap", flex: 1,
+        boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
+      }}>
+        {streaming ? (
+          <TypingDots />
+        ) : (
+          <>
+            {shown}
+            {!done && <span style={{
+              display: "inline-block", width: 7, height: 14, marginLeft: 2,
+              background: "#7C3AED", verticalAlign: "text-bottom",
+              animation: "bbCaret 0.9s steps(2) infinite",
+            }} />}
+          </>
+        )}
+      </div>
     </div>
   );
 };
 
 const UserBubble = ({ text }) => (
   <div data-testid="user-message" style={{
-    background: COLORS.text, color: "#fff", borderRadius: 12,
+    background: "linear-gradient(135deg, #312E81 0%, #4F46E5 100%)",
+    color: "#fff", borderRadius: "14px 4px 14px 14px",
     padding: "10px 14px", fontSize: 13.5, lineHeight: 1.55,
-    maxWidth: "85%", alignSelf: "flex-end",
+    maxWidth: "85%", alignSelf: "flex-end", fontWeight: 500,
+    boxShadow: "0 4px 14px rgba(79,70,229,0.28)",
   }}>{text}</div>
 );
 
@@ -1012,7 +1037,6 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
       setSessionId(res.data.session_id);
       setMessages(m => {
         const next = [...m];
-        // Replace the last assistant placeholder
         const lastIdx = next.findLastIndex(x => x.role === "assistant");
         if (lastIdx >= 0) {
           next[lastIdx] = { role: "assistant", text: sanitizeAnswer(res.data.answer), streaming: false };
@@ -1044,44 +1068,80 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Subtle backdrop — does NOT block, just darkens slightly */}
       <div data-testid="ask-backdrop" onClick={onClose} style={{
-        position: "fixed", inset: 0, background: "rgba(17,24,39,0.35)",
+        position: "fixed", inset: 0, background: "rgba(15,23,42,0.18)",
         zIndex: 200, animation: "bbFade 0.18s ease",
       }} />
-      {/* Drawer */}
+      {/* Floating bottom-right card */}
       <aside data-testid="ask-blackbox-panel" style={{
-        position: "fixed", top: 0, right: 0, height: "100vh",
-        width: "min(440px, 100vw)", background: COLORS.surface,
-        borderLeft: `1px solid ${COLORS.border}`, zIndex: 201,
+        position: "fixed", bottom: 24, right: 24,
+        width: "min(460px, calc(100vw - 32px))",
+        height: "min(640px, calc(100vh - 48px))",
+        background: "#FAF8F4",
+        borderRadius: 20, zIndex: 201,
         display: "flex", flexDirection: "column",
-        boxShadow: "-12px 0 40px rgba(17,24,39,0.18)",
-        animation: "bbSlide 0.22s ease",
-        fontFamily: FONT,
+        boxShadow: "0 24px 60px rgba(15,23,42,0.32), 0 0 0 1px rgba(255,255,255,0.5)",
+        animation: "bbPopIn 0.28s cubic-bezier(0.16,1,0.3,1)",
+        fontFamily: FONT, overflow: "hidden",
       }}>
-        {/* Header */}
-        <div style={{ padding: "16px 18px", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800 }}>✦</div>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: COLORS.text, lineHeight: 1.2, letterSpacing: -0.2 }}>Ask Blackbox</div>
-              <div style={{ fontSize: 11, color: COLORS.textTertiary, fontWeight: 500 }}>Your AI analyst · {WEEKS[weekIdx].label}</div>
+        {/* Dark gradient header */}
+        <div style={{
+          padding: "18px 20px",
+          background: "linear-gradient(135deg, #0F172A 0%, #312E81 55%, #4F46E5 100%)",
+          color: "#fff", position: "relative",
+        }}>
+          {/* Decorative grain */}
+          <div style={{
+            position: "absolute", inset: 0, opacity: 0.18, pointerEvents: "none",
+            backgroundImage: "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.25) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(124,58,237,0.4) 0%, transparent 50%)",
+          }} />
+          <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: "rgba(255,255,255,0.12)",
+                border: "1px solid rgba(255,255,255,0.18)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                backdropFilter: "blur(8px)",
+              }}>
+                <span className="bb-pulse-dot-large" />
+              </div>
+              <div style={{ lineHeight: 1.15 }}>
+                <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: -0.3 }}>Pulse</div>
+                <div style={{ fontSize: 11, opacity: 0.75, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                  Your AI analyst · {WEEKS[weekIdx].label}
+                </div>
+              </div>
             </div>
+            <button onClick={onClose} data-testid="close-ask-btn" style={{
+              background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.15)",
+              color: "#fff", width: 30, height: 30, borderRadius: 8,
+              fontSize: 14, cursor: "pointer", padding: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "background 0.15s",
+            }}
+            onMouseOver={e => e.currentTarget.style.background = "rgba(255,255,255,0.2)"}
+            onMouseOut={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
+            aria-label="Close">✕</button>
           </div>
-          <button onClick={onClose} data-testid="close-ask-btn" style={{
-            background: "none", border: "none", color: COLORS.textSecondary,
-            fontSize: 18, cursor: "pointer", padding: 6, borderRadius: 6,
-          }} aria-label="Close">✕</button>
         </div>
 
-        {/* Body */}
-        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        {/* Body — cream */}
+        <div ref={scrollRef} style={{
+          flex: 1, overflowY: "auto", padding: "16px 18px",
+          display: "flex", flexDirection: "column", gap: 12,
+          background: "#FAF8F4",
+        }}>
           {messages.length === 0 && (
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 13.5, color: COLORS.text, lineHeight: 1.6 }}>
-                Hi Jennifer — ask me anything about agent performance for{" "}
-                <strong style={{ color: COLORS.accentDark }}>{WEEKS[weekIdx].label}</strong>.
-                I have the current week's scores, issues, and trends loaded.
+            <div style={{ marginTop: 4 }}>
+              <div style={{ fontSize: 15, color: "#0F172A", lineHeight: 1.55, fontWeight: 600 }}>
+                Hey Jennifer.
+              </div>
+              <div style={{ fontSize: 13.5, color: "#475569", lineHeight: 1.6, marginTop: 6 }}>
+                I have your full agent picture loaded for{" "}
+                <strong style={{ color: "#4F46E5" }}>{WEEKS[weekIdx].label}</strong>.
+                Pick a question or type your own.
               </div>
               <SuggestedChips onPick={send} disabled={pending} />
             </div>
@@ -1092,51 +1152,67 @@ const AskBlackboxPanel = ({ open, onClose, weekIdx, weights }) => {
               : <AssistantBubble key={i} text={m.text} streaming={!!m.streaming} />
           ))}
           {error && (
-            <div data-testid="ask-error" style={{ fontSize: 12, color: COLORS.bad, background: COLORS.badBg, border: `1px solid ${COLORS.badBorder}`, padding: "8px 12px", borderRadius: 8 }}>
+            <div data-testid="ask-error" style={{
+              fontSize: 12, color: "#991B1B", background: "#FEF2F2",
+              border: "1px solid #FECACA", padding: "8px 12px", borderRadius: 8,
+            }}>
               {error}
             </div>
           )}
         </div>
 
-        {/* Composer */}
-        <div style={{ borderTop: `1px solid ${COLORS.border}`, padding: 12, background: COLORS.surface }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+        {/* Composer — pill-shaped */}
+        <div style={{
+          padding: 14,
+          background: "#FAF8F4",
+          borderTop: "1px solid rgba(99,102,241,0.12)",
+        }}>
+          <div style={{
+            display: "flex", gap: 8, alignItems: "flex-end",
+            background: "#FFFFFF",
+            border: "1px solid rgba(99,102,241,0.2)",
+            borderRadius: 16,
+            padding: 6,
+            boxShadow: "0 2px 8px rgba(15,23,42,0.04)",
+            transition: "border-color 0.15s, box-shadow 0.15s",
+          }}>
             <textarea
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={onKey}
               data-testid="ask-input"
-              placeholder="Ask about agents, scores, costs, trends…"
-              rows={2}
+              placeholder="Ask anything about your agents…"
+              rows={1}
               disabled={pending}
               style={{
-                flex: 1, resize: "none", border: `1px solid ${COLORS.border}`,
-                borderRadius: 10, padding: "10px 12px", fontSize: 13.5,
-                fontFamily: FONT, color: COLORS.text, outline: "none",
-                background: pending ? "#F9FAFB" : "#FFF", lineHeight: 1.45,
-                transition: "border-color 0.15s, box-shadow 0.15s",
+                flex: 1, resize: "none", border: "none",
+                padding: "8px 10px", fontSize: 13.5,
+                fontFamily: FONT, color: "#0F172A", outline: "none",
+                background: "transparent", lineHeight: 1.45,
+                maxHeight: 120, minHeight: 28,
               }}
-              onFocus={e => { e.currentTarget.style.borderColor = COLORS.accent; e.currentTarget.style.boxShadow = `0 0 0 3px ${COLORS.accentLight}`; }}
-              onBlur={e => { e.currentTarget.style.borderColor = COLORS.border; e.currentTarget.style.boxShadow = "none"; }}
             />
             <button
               onClick={() => send()}
               disabled={pending || !input.trim()}
               data-testid="ask-send-btn"
               style={{
-                padding: "10px 16px", borderRadius: 10, border: "none",
-                background: (pending || !input.trim()) ? COLORS.accentMid : COLORS.accent,
-                color: "#fff", fontSize: 13, fontWeight: 600,
+                padding: "8px 14px", borderRadius: 12, border: "none",
+                background: (pending || !input.trim())
+                  ? "#CBD5E1"
+                  : "linear-gradient(135deg, #4F46E5, #7C3AED)",
+                color: "#fff", fontSize: 13, fontWeight: 700,
                 cursor: (pending || !input.trim()) ? "not-allowed" : "pointer",
                 fontFamily: FONT, transition: "all 0.15s",
-                display: "flex", alignItems: "center", gap: 6, minHeight: 40,
+                display: "flex", alignItems: "center", gap: 6, minHeight: 36,
+                boxShadow: (pending || !input.trim()) ? "none" : "0 4px 12px rgba(79,70,229,0.35)",
               }}
             >
-              {pending ? <span className="bb-spinner" style={{ width: 12, height: 12 }} /> : "Send"}
+              {pending ? <span className="bb-spinner" style={{ width: 12, height: 12 }} /> : "↑"}
             </button>
           </div>
-          <div style={{ fontSize: 10.5, color: COLORS.textTertiary, marginTop: 6, paddingLeft: 2 }}>
-            Press Enter to send · Shift+Enter for newline
+          <div style={{ fontSize: 10.5, color: "#64748B", marginTop: 8, paddingLeft: 4, fontWeight: 500 }}>
+            Enter to send · Shift+Enter for newline
           </div>
         </div>
       </aside>
@@ -1173,6 +1249,7 @@ export default function Blackbox() {
       {/* Local styles for animations */}
       <style>{`
         @keyframes bbSlide { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes bbPopIn { from { transform: translateY(20px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
         @keyframes bbFade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes bbPulse { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
         @keyframes bbCaret { 50% { opacity: 0; } }
@@ -1190,39 +1267,69 @@ export default function Blackbox() {
         .bb-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:${COLORS.accent}; animation: bbPulse 1.1s infinite ease-in-out both; }
         .bb-spinner { display:inline-block; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation: bbSpin 0.7s linear infinite; }
 
-        /* Hero Ask Blackbox button */
-        .bb-ask-cta {
+        /* Larger pulse dot used inside the panel header avatar */
+        .bb-pulse-dot-large {
+          position: relative;
+          display: inline-block;
+          width: 10px; height: 10px;
+          border-radius: 50%;
+          background: #34D399;
+          box-shadow: 0 0 0 3px rgba(52,211,153,0.25);
+        }
+        .bb-pulse-dot-large::before {
+          content: "";
+          position: absolute;
+          inset: -5px;
+          border-radius: 50%;
+          background: rgba(52,211,153,0.5);
+          animation: bbHeartbeat 1.4s ease-in-out infinite;
+        }
+
+        /* Pulse hero CTA — heartbeat-themed */
+        .bb-pulse-cta {
           position: relative;
           display: inline-flex;
           align-items: center;
-          gap: 9px;
-          padding: 11px 22px;
+          gap: 10px;
+          padding: 11px 22px 11px 18px;
           border-radius: 999px;
-          background: linear-gradient(120deg, #4F46E5 0%, #7C3AED 50%, #DB2777 100%);
-          background-size: 200% 200%;
+          background: linear-gradient(120deg, #0F172A 0%, #312E81 50%, #4F46E5 100%);
+          background-size: 220% 220%;
           background-position: 0% 50%;
-          border: none;
+          border: 1px solid rgba(255,255,255,0.15);
           color: #fff;
-          font-size: 13.5px;
+          font-size: 14px;
           font-weight: 800;
-          letter-spacing: 0.2px;
+          letter-spacing: 0.4px;
+          text-transform: uppercase;
           font-family: ${FONT};
           cursor: pointer;
           overflow: hidden;
-          transition: transform 0.18s ease, background-position 0.6s ease;
-          animation: bbGlow 2.6s ease-in-out infinite;
+          transition: transform 0.18s ease, background-position 0.6s ease, box-shadow 0.2s ease;
+          box-shadow: 0 6px 20px rgba(15,23,42,0.35), inset 0 1px 0 rgba(255,255,255,0.08);
         }
-        .bb-ask-cta:hover { transform: translateY(-1px) scale(1.02); background-position: 100% 50%; }
-        .bb-ask-cta:active { transform: translateY(0) scale(0.99); }
-        .bb-ask-cta .bb-spark { display:inline-block; font-size: 14px; animation: bbSparkleSpin 6s linear infinite; }
-        .bb-ask-cta::after {
+        .bb-pulse-cta:hover { transform: translateY(-1px) scale(1.03); background-position: 100% 50%; box-shadow: 0 10px 28px rgba(79,70,229,0.45), inset 0 1px 0 rgba(255,255,255,0.12); }
+        .bb-pulse-cta:active { transform: translateY(0) scale(0.99); }
+        .bb-pulse-cta .bb-pulse-dot {
+          position: relative;
+          display: inline-block;
+          width: 9px; height: 9px;
+          border-radius: 50%;
+          background: #34D399;
+          box-shadow: 0 0 0 3px rgba(52,211,153,0.25);
+        }
+        .bb-pulse-cta .bb-pulse-dot::before {
           content: "";
           position: absolute;
-          top: 0; left: 0;
-          width: 40%; height: 100%;
-          background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.45) 50%, transparent 100%);
-          animation: bbShine 3.2s ease-in-out infinite;
-          pointer-events: none;
+          inset: -4px;
+          border-radius: 50%;
+          background: rgba(52,211,153,0.55);
+          animation: bbHeartbeat 1.4s ease-in-out infinite;
+        }
+        @keyframes bbHeartbeat {
+          0%   { transform: scale(0.8); opacity: 0.7; }
+          50%  { transform: scale(1.6); opacity: 0; }
+          100% { transform: scale(0.8); opacity: 0; }
         }
 
         /* Hide platform-injected "Made with Emergent" badge */
@@ -1239,16 +1346,19 @@ export default function Blackbox() {
         background: "rgba(255,255,255,0.9)", backdropFilter: "blur(12px)",
         position: "sticky", top: 0, zIndex: 100,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => nav("overview")} data-testid="logo-home">
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>B</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => nav("overview")} data-testid="logo-home">
+          <div style={{ width: 38, height: 38, borderRadius: 10, background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 12px rgba(79,70,229,0.35)" }}>
+            <span style={{ fontSize: 19, fontWeight: 900, color: "#fff", letterSpacing: -0.5 }}>B</span>
           </div>
-          <span style={{ fontSize: 17, fontWeight: 800, color: COLORS.text, letterSpacing: -0.5 }}>Blackbox</span>
-          <span style={{ fontSize: 11, color: COLORS.textTertiary, marginLeft: 2, fontWeight: 500 }}>Agent Health Intelligence</span>
+          <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.05 }}>
+            <span style={{ fontSize: 22, fontWeight: 900, color: COLORS.text, letterSpacing: -0.8 }}>Blackbox</span>
+            <span style={{ fontSize: 11.5, color: COLORS.textSecondary, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>Agent Health Intelligence</span>
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <button onClick={() => setAskOpen(true)} data-testid="open-ask-btn" className="bb-ask-cta">
-            <span className="bb-spark">✦</span> Ask Blackbox
+          <button onClick={() => setAskOpen(true)} data-testid="open-ask-btn" className="bb-pulse-cta">
+            <span className="bb-pulse-dot" />
+            Pulse
           </button>
           <span style={{ fontSize: 12, color: COLORS.textSecondary }}>Jennifer's Workspace</span>
           <div style={{ width: 30, height: 30, borderRadius: "50%", background: `linear-gradient(135deg, ${COLORS.accent}, #7C3AED)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>J</div>

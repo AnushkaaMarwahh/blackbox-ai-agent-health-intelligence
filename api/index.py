@@ -63,13 +63,14 @@ def _get_db():
         return None
 
 
-SYSTEM_MESSAGE = """You are Blackbox AI, an analytics assistant embedded inside the Blackbox Agent Health Intelligence platform.
+SYSTEM_MESSAGE = """You are Pulse, the AI analyst inside the Blackbox Agent Health Intelligence platform.
 
 You help Product Managers understand the health of their AI agents. You have access to the current week's agent performance data, which is provided to you in the user message under the "AGENT DATA" section.
 
 Style rules (strict):
 - Plain text only. No markdown. No asterisks for bold. No headers. No backticks.
 - NEVER use em dashes (—) or en dashes (–). Use a period, comma, or colon instead.
+- NEVER mention specific calendar dates, months, or years. Do NOT write things like "April 15", "April 2026", "Apr 28", "May 4", "Q2", "2026", or "last Thursday". Refer to time only as "this week", "last week", "the past N weeks", or "Week 1 / Week 2 / Week 3 / Week 4".
 - Use straight punctuation: regular hyphens (-) are fine.
 - Bullets only when listing 3 or more items, and prefix each line with "- ".
 - Be concise. PMs are busy. Default to 3 to 6 short sentences unless the user asks for more depth.
@@ -78,7 +79,7 @@ Style rules (strict):
 Content rules:
 - Cite specific metrics from the data (agent name, score, % change, conversation counts).
 - If the data does not contain the answer, say so explicitly. Do not invent numbers.
-- When asked why something happened, ground the explanation in the listed issues and detail fields.
+- When asked why something happened, ground the explanation in the listed issues and detail fields, but rephrase any dates from those fields as "earlier this period" or "a few weeks ago".
 - When asked for recommendations, prioritize by severity (high, then medium, then low) and quantify impact when the data allows.
 - Tone: calm, analytical, peer to peer. You are talking to a senior PM, not a beginner."""
 
@@ -116,6 +117,14 @@ app.add_middleware(
 
 _DASH_RE = re.compile(r",\s*,")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MONTH_PATTERN = (
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+)
+_MONTH_DAY_RE = re.compile(rf"\b{_MONTH_PATTERN}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?\b", re.IGNORECASE)
+_MONTH_YEAR_RE = re.compile(rf"\b{_MONTH_PATTERN}\s+\d{{4}}\b", re.IGNORECASE)
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_QUARTER_RE = re.compile(r"\bQ[1-4]\s*(?:19|20)?\d{0,2}\b")
 
 def _sanitize(answer: str) -> str:
     if not isinstance(answer, str):
@@ -123,6 +132,10 @@ def _sanitize(answer: str) -> str:
     answer = _BOLD_RE.sub(r"\1", answer)
     answer = answer.replace(" — ", ", ").replace("—", ", ")
     answer = answer.replace(" – ", ", ").replace("–", ", ")
+    answer = _MONTH_DAY_RE.sub("earlier this period", answer)
+    answer = _MONTH_YEAR_RE.sub("earlier this period", answer)
+    answer = _YEAR_RE.sub("this period", answer)
+    answer = _QUARTER_RE.sub("this period", answer)
     return _DASH_RE.sub(",", answer).strip()
 
 
