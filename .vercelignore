@@ -1,0 +1,102 @@
+# =====================================================================
+# .vercelignore
+# Excludes files from the Vercel deployment package (similar to .gitignore
+# but applied at deploy time). Keeps the serverless function payload small
+# and prevents secrets / dev-only artifacts from being uploaded.
+# =====================================================================
+
+# --- Version control & platform meta ---
+.git/
+.gitignore
+.gitattributes
+.github/
+.emergent/
+.vercel/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# --- Python caches & artifacts (cuts hundreds of MB on cold deploys) ---
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Local FastAPI server (Vercel uses /api, not /backend) ---
+backend/
+
+# --- Tests & test outputs (never needed in production) ---
+tests/
+test_reports/
+**/test_*.py
+**/*_test.py
+**/conftest.py
+test_result.md
+pytest.ini
+tox.ini
+
+# --- Node / frontend build artifacts (Vercel rebuilds them) ---
+**/node_modules/
+frontend/build/
+frontend/.cache/
+frontend/coverage/
+*.tsbuildinfo
+.eslintcache
+
+# --- Environment files & secrets (CRITICAL: never ship .env to Vercel) ---
+# Vercel injects env vars via Project Settings, NOT files.
+.env
+.env.*
+**/.env
+**/.env.*
+# Re-include the one production env file the React build actually needs
+!frontend/.env.production
+
+# --- Logs ---
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Editor / IDE ---
+.idea/
+.vscode/
+*.iml
+
+# --- Emergent project memory, scratch, & docs not needed at runtime ---
+memory/
+scripts/
+plugins/
+blackbox-2.jsx
+README.md
+VERCEL_DEPLOY.md
+
+# --- Archive files ---
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.rar
+
+# --- Python lockfiles & local tooling configs ---
+.python-version
+Pipfile
+Pipfile.lock
+poetry.lock
+pyproject.toml
+mypy.ini
+.flake8
