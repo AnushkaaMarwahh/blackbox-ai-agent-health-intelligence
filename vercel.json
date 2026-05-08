@@ -7,7 +7,8 @@
   "functions": {
     "api/index.py": {
       "runtime": "@vercel/python@4.3.0",
-      "maxDuration": 60
+      "maxDuration": 60,
+      "excludeFiles": "{frontend/**,backend/**,tests/**,test_reports/**,memory/**,scripts/**,plugins/**,node_modules/**,**/node_modules/**,**/__pycache__/**,**/*.pyc,.git/**,.emergent/**,.vercel/**,.github/**,*.md,blackbox-2.jsx,test_result.md,VERCEL_DEPLOY.md,README.md}"
     }
   },
   "rewrites": [
